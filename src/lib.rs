@@ -1,4 +1,5 @@
 #![feature(core, collections, nonzero, box_raw)]
+#![feature(alloc, heap_api, core_intrinsics)]
 
 // This is an attempt at an implementation following the ideal
 //
@@ -24,7 +25,10 @@
 
 extern crate collections;
 extern crate core;
+extern crate alloc;
 
 mod node;
 mod search;
 pub mod map;
+
+pub use map::BTreeMap;

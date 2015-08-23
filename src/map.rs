@@ -1,16 +1,30 @@
 
 use collections::borrow::Borrow;
+use core::mem;
 
 use node;
 use search;
 
+use node::InsertResult::*;
 use search::SearchResult::*;
 
 pub struct BTreeMap<K, V> {
-    root: node::Root<K, V>
+    root: node::Root<K, V>,
+    length: usize
 }
 
 impl<K: Ord, V> BTreeMap<K, V> {
+    pub fn new() -> Self {
+        BTreeMap {
+            root: node::Root::new_leaf(),
+            length: 0
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.length
+    }
+
     // Searching in a B-Tree is pretty straightforward.
     //
     // Start at the root. Try to find the key in the current node. If we find it, return it.
@@ -33,7 +47,7 @@ impl<K: Ord, V> BTreeMap<K, V> {
     /// map.insert(1, "a");
     /// assert_eq!(map.get(&1), Some(&"a"));
     /// assert_eq!(map.get(&2), None);
-    /// ````
+    /// ```
     pub fn get<Q: ?Sized>(&self, key: &Q) -> Option<&V> where K: Borrow<Q>, Q: Ord {
         match search::search_tree(self.root.as_ref(), key) {
             Found(handle) => Some(handle.into_kv().1),
@@ -83,6 +97,50 @@ impl<K: Ord, V> BTreeMap<K, V> {
             Found(handle) => Some(handle.into_kv_mut().1),
             GoDown(_) => None
         }
+    }
+
+    pub fn insert(&mut self, key: K, value: V) -> Option<V> {
+        let mut ins_k;
+        let mut ins_v;
+        let mut ins_edge;
+
+        {
+            let insert_point = match search::search_tree(self.root.as_mut(), &key) {
+                Found(handle) => return Some(mem::replace(handle.into_kv_mut().1, value)),
+                GoDown(insert_point) => insert_point
+            };
+
+            self.length += 1;
+
+            let mut cur_parent = match insert_point.insert(key, value) {
+                Fit(_) => return None,
+                Split(left, k, v, right) => {
+                    ins_k = k;
+                    ins_v = v;
+                    ins_edge = right;
+                    left.ascend().ok()
+                }
+            };
+
+            loop {
+                match cur_parent {
+                    Some(parent) => match parent.insert(ins_k, ins_v, ins_edge) {
+                        Fit(_) => return None,
+                        Split(left, k, v, right) => {
+                            ins_k = k;
+                            ins_v = v;
+                            ins_edge = right;
+                            cur_parent = left.ascend().ok();
+                        }
+                    },
+                    None => break
+                }
+            }
+        }
+
+        self.root.enlarge().push(ins_k, ins_v, ins_edge);
+
+        None
     }
 }
 
