@@ -249,34 +249,40 @@ impl<'a, K: 'a, V: 'a> Iterator for Iter<'a, K, V> {
     type Item = (&'a K, &'a V);
 
     fn next(&mut self) -> Option<(&'a K, &'a V)> {
-        let mut cur_handle = self.handle.ignore_type();
+        let mut cur_handle = match self.handle.right_kv() {
+            Ok(kv) => {
+                let ret = kv.into_kv();
+                self.handle = kv.right_edge();
+                return Some(ret);
+            },
+            Err(last_edge) => match last_edge.into_node().ascend() {
+                Ok(handle) => handle,
+                Err(_) => return None
+            }
+        };
 
         loop {
             match cur_handle.right_kv() {
                 Ok(kv) => {
                     let ret = kv.into_kv();
-                    self.handle = first_leaf_edge(kv.right_edge());
+                    self.handle = first_leaf_edge(kv.right_edge().descend());
                     return Some(ret);
                 },
-                Err(last_edge) => {
-                    match last_edge.into_node().ascend() {
-                        Ok(new_handle) => {
-                            cur_handle = new_handle.ignore_type();
-                        },
-                        Err(_) => return None
-                    }
+                Err(last_edge) => match last_edge.into_node().ascend() {
+                    Ok(new_handle) => cur_handle = new_handle,
+                    Err(_) => return None
                 }
             }
         }
     }
 }
 
-fn first_leaf_edge<'a, K: 'a, V: 'a, Mutability>(mut edge: Handle<NodeRef<'a, K, V, Mutability, marker::LeafOrInternal>, marker::Edge>) -> Handle<NodeRef<'a, K, V, Mutability, marker::Leaf>, marker::Edge> {
+fn first_leaf_edge<'a, K: 'a, V: 'a, Mutability>(mut node: NodeRef<'a, K, V, Mutability, marker::LeafOrInternal>) -> Handle<NodeRef<'a, K, V, Mutability, marker::Leaf>, marker::Edge> {
     loop {
-        match edge.force() {
-            Leaf(leaf) => return leaf,
+        match node.force() {
+            Leaf(leaf) => return leaf.first_edge(),
             Internal(internal) => {
-                edge = internal.descend().first_edge();
+                node = internal.first_edge().descend();
             }
         }
     }
@@ -304,7 +310,7 @@ impl<K, V> BTreeMap<K, V> {
     /// ```
     pub fn iter(&self) -> Iter<K, V> {
         Iter {
-            handle: first_leaf_edge(self.root.as_ref().first_edge())
+            handle: first_leaf_edge(self.root.as_ref())
         }
     }
 

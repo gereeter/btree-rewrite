@@ -281,14 +281,6 @@ impl<'a, K: 'a, V: 'a, Mutability, Type> NodeRef<'a, K, V, Mutability, Type> {
         let len = self.len();
         unsafe { Handle::new(self, len) }
     }
-
-    pub fn ignore_type(self) -> NodeRef<'a, K, V, Mutability, marker::LeafOrInternal> {
-        NodeRef {
-            height: self.height,
-            node: self.node,
-            _marker: PhantomData
-        }
-    }
 }
 
 impl<'a, K: 'a, V: 'a, Type> NodeRef<'a, K, V, marker::Mut, Type> {
@@ -401,14 +393,6 @@ impl<Node, Type> Handle<Node, Type> {
 
     pub fn into_node(self) -> Node {
         self.node
-    }
-}
-
-impl<'a, K: 'a, V: 'a, Mutability, NodeType, HandleType> Handle<NodeRef<'a, K, V, Mutability, NodeType>, HandleType> {
-    pub fn ignore_type(self) -> Handle<NodeRef<'a, K, V, Mutability, marker::LeafOrInternal>, HandleType> {
-        unsafe {
-            Handle::new(self.node.ignore_type(), self.idx)
-        }
     }
 }
 
