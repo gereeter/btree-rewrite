@@ -57,23 +57,23 @@ impl<K: Debug, V: Debug> BTreeMap<K, V> {
     pub fn dump(&self) {
         fn dump_node<'a, K: Debug + 'a, V: Debug + 'a>(node: NodeRef<'a, K, V, marker::Immut, marker::LeafOrInternal>, max_height: usize) {
             let indent = (max_height - node.height()) * 2;
-            for i in 0..indent { write!(stderr(), " "); }
-            writeln!(stderr(), "At node with height {}, idx {}", node.height(), node.parent_idx());
-            for i in 0..indent { write!(stderr(), " "); }
-            writeln!(stderr(), "Keys: {:?}", node.keys());
-            for i in 0..indent { write!(stderr(), " "); }
-            writeln!(stderr(), "Vals: {:?}", node.vals());
+            for _ in 0..indent { write!(stderr(), " ").unwrap(); }
+            writeln!(stderr(), "At node with height {}, idx {}", node.height(), node.parent_idx()).unwrap();
+            for _ in 0..indent { write!(stderr(), " ").unwrap(); }
+            writeln!(stderr(), "Keys: {:?}", node.keys()).unwrap();
+            for _ in 0..indent { write!(stderr(), " ").unwrap(); }
+            writeln!(stderr(), "Vals: {:?}", node.vals()).unwrap();
 
             if let Internal(node) = node.force() {
-                writeln!(stderr(), "");
+                writeln!(stderr(), "").unwrap();
                 for i in 0..(node.len()+1) {
                     let handle = unsafe { Handle::new(node, i) };
                     dump_node(handle.descend(), max_height);
                 }
             }
-            for i in 0..indent { write!(stderr(), " "); }
-            writeln!(stderr(), "Done with node at height {}", node.height());
-            writeln!(stderr(), "");
+            for _ in 0..indent { write!(stderr(), " ").unwrap(); }
+            writeln!(stderr(), "Done with node at height {}", node.height()).unwrap();
+            writeln!(stderr(), "").unwrap();
         }
         dump_node(self.root.as_ref(), self.root.as_ref().height());
     }

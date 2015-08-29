@@ -331,7 +331,7 @@ impl<'a, K: 'a, V: 'a, Type> NodeRef<'a, K, V, marker::Mut, Type> {
 }
 
 impl<'a, K: 'a, V: 'a> NodeRef<'a, K, V, marker::Mut, marker::Internal> {
-    pub fn push(&mut self, key: K, val: V, mut edge: Root<K, V>) {
+    pub fn push(&mut self, key: K, val: V, edge: Root<K, V>) {
         // Necessary for correctness, but this is an internal module
         debug_assert!(edge.height == self.height - 1);
         debug_assert!(self.len() < self.capacity());
@@ -472,7 +472,7 @@ impl<'a, K: 'a, V: 'a> Handle<NodeRef<'a, K, V, marker::Mut, marker::Internal>, 
         Handle::new(self.node.cast_unchecked(), self.idx)
     }
 
-    unsafe fn insert_unchecked(&mut self, key: K, val: V, mut edge: Root<K, V>) {
+    unsafe fn insert_unchecked(&mut self, key: K, val: V, edge: Root<K, V>) {
         self.cast_unchecked::<marker::Leaf>().insert_unchecked(key, val);
 
         slice_insert(slice::from_raw_parts_mut(self.node.as_internal_mut().edges.as_mut_ptr(), self.node.len()), self.idx + 1, edge.node);
@@ -612,9 +612,7 @@ impl<'a, K: 'a, V: 'a> Handle<NodeRef<'a, K, V, marker::Mut, marker::Internal>, 
                 };
                 
                 for i in 0..(new_len+1) {
-                    unsafe {
-                        Handle::new(new_ref.reborrow_mut(), i).correct_parent_link();
-                    }
+                    Handle::new(new_ref.reborrow_mut(), i).correct_parent_link();
                 }
             }
 
