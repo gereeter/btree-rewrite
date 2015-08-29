@@ -137,6 +137,7 @@ impl<K, V> Root<K, V> {
         NodeRef {
             height: self.height,
             node: self.node,
+            root: self as *const _ as *mut _,
             _marker: PhantomData,
         }
     }
@@ -145,6 +146,7 @@ impl<K, V> Root<K, V> {
         NodeRef {
             height: self.height,
             node: self.node,
+            root: self as *mut _,
             _marker: PhantomData,
         }
     }
@@ -159,6 +161,7 @@ impl<K, V> Root<K, V> {
         let mut ret = NodeRef {
             height: self.height,
             node: self.node,
+            root: self as *mut _,
             _marker: PhantomData
         };
 
@@ -173,6 +176,7 @@ impl<K, V> Root<K, V> {
 pub struct NodeRef<'a, K: 'a, V: 'a, Mutability, Type> {
     height: usize,
     node: BoxedNode<K, V>,
+    root: *mut Root<K, V>,
     _marker: PhantomData<(&'a mut (K, V), Mutability, Type)>
 }
 
@@ -221,6 +225,7 @@ impl<'a, K: 'a, V: 'a, Mutability, Type> NodeRef<'a, K, V, Mutability, Type> {
         NodeRef {
             height: self.height,
             node: self.node,
+            root: self.root,
             _marker: PhantomData
         }
     }
@@ -265,6 +270,7 @@ impl<'a, K: 'a, V: 'a, Mutability, Type> NodeRef<'a, K, V, Mutability, Type> {
                         ptr: unsafe { NonZero::new(self.as_leaf().parent as *mut u8) },
                         _marker: PhantomData
                     },
+                    root: self.root,
                     _marker: PhantomData
                 },
                 idx: self.as_leaf().parent_idx as usize,
@@ -284,18 +290,26 @@ impl<'a, K: 'a, V: 'a, Mutability, Type> NodeRef<'a, K, V, Mutability, Type> {
 }
 
 impl<'a, K: 'a, V: 'a, Type> NodeRef<'a, K, V, marker::Mut, Type> {
+    pub fn into_root_mut(self) -> &'a mut Root<K, V> {
+        unsafe {
+            &mut *self.root
+        }
+    }
+
     unsafe fn cast_unchecked<NewType>(&mut self) -> NodeRef<K, V, marker::Mut, NewType> {
         NodeRef {
             height: self.height,
             node: self.node,
+            root: self.root,
             _marker: PhantomData
         }
     }
 
-    fn reborrow_mut(&mut self) -> NodeRef<K, V, marker::Mut, Type> {
+    unsafe fn reborrow_mut(&mut self) -> NodeRef<K, V, marker::Mut, Type> {
         NodeRef {
             height: self.height,
             node: self.node,
+            root: self.root,
             _marker: PhantomData
         }
     }
@@ -322,11 +336,11 @@ impl<'a, K: 'a, V: 'a, Type> NodeRef<'a, K, V, marker::Mut, Type> {
     }
 
     pub fn keys_mut(&mut self) -> &mut [K] {
-        self.reborrow_mut().into_slices_mut().0
+        unsafe { self.reborrow_mut().into_slices_mut().0 }
     }
 
     pub fn vals_mut(&mut self) -> &mut [V] {
-        self.reborrow_mut().into_slices_mut().1
+        unsafe { self.reborrow_mut().into_slices_mut().1 }
     }
 }
 
@@ -357,12 +371,14 @@ impl<'a, K: 'a, V: 'a, Mutability> NodeRef<'a, K, V, Mutability, marker::LeafOrI
             ForceResult::Leaf(NodeRef {
                 height: self.height,
                 node: self.node,
+                root: self.root,
                 _marker: PhantomData
             })
         } else {
             ForceResult::Internal(NodeRef {
                 height: self.height,
                 node: self.node,
+                root: self.root,
                 _marker: PhantomData
             })
         }
@@ -406,6 +422,12 @@ impl<Node> Handle<Node, marker::KV> {
     }
 }
 
+impl<'a, K: 'a, V: 'a, Mutability, NodeType, HandleType> Handle<NodeRef<'a, K, V, Mutability, NodeType>, HandleType> {
+    pub fn reborrow(&self) -> Handle<NodeRef<K, V, marker::Immut, NodeType>, HandleType> {
+        unsafe { Handle::new(self.node.reborrow(), self.idx) }
+    }
+}
+
 impl<'a, K: 'a, V: 'a, Mutability, NodeType> Handle<NodeRef<'a, K, V, Mutability, NodeType>, marker::Edge> {
     pub fn left_kv(self) -> Result<Handle<NodeRef<'a, K, V, Mutability, NodeType>, marker::KV>, Self> {
         if self.idx > 0 {
@@ -429,32 +451,34 @@ impl<'a, K: 'a, V: 'a, Mutability, NodeType> Handle<NodeRef<'a, K, V, Mutability
 }
 
 impl<'a, K: 'a, V: 'a> Handle<NodeRef<'a, K, V, marker::Mut, marker::Leaf>, marker::Edge> {
-    unsafe fn insert_unchecked(&mut self, key: K, val: V) {
+    unsafe fn insert_unchecked(&mut self, key: K, val: V) -> *mut V {
         slice_insert(self.node.keys_mut(), self.idx, key);
         slice_insert(self.node.vals_mut(), self.idx, val);
 
         self.node.as_leaf_mut().len += 1;
+
+        self.node.vals_mut().get_unchecked_mut(self.idx)
     }
 
-    pub fn insert(mut self, key: K, val: V) -> InsertResult<'a, K, V, marker::Leaf> {
+    pub fn insert(mut self, key: K, val: V) -> (InsertResult<'a, K, V, marker::Leaf>, *mut V) {
         if self.node.len() < self.node.capacity() {
             unsafe {
-                self.insert_unchecked(key, val);
-                InsertResult::Fit(Handle::new(self.node, self.idx))
+                let ptr = self.insert_unchecked(key, val);
+                (InsertResult::Fit(Handle::new(self.node, self.idx)), ptr)
             }
         } else {
             let middle = unsafe { Handle::new(self.node, T) };
             let (mut left, k, v, mut right) = middle.split();
-            if self.idx <= T {
+            let ptr = if self.idx <= T {
                 unsafe {
-                    Handle::new(left.reborrow_mut(), self.idx).insert_unchecked(key, val);
+                    Handle::new(left.reborrow_mut(), self.idx).insert_unchecked(key, val)
                 }
             } else {
                 unsafe {
-                    Handle::new(right.as_mut().cast_unchecked::<marker::Leaf>(), self.idx - T - 1).insert_unchecked(key, val);
+                    Handle::new(right.as_mut().cast_unchecked::<marker::Leaf>(), self.idx - T - 1).insert_unchecked(key, val)
                 }
-            }
-            InsertResult::Split(left, k, v, right)
+            };
+            (InsertResult::Split(left, k, v, right), ptr)
         }
     }
 }
@@ -514,6 +538,7 @@ impl<'a, K: 'a, V: 'a, Mutability> Handle<NodeRef<'a, K, V, Mutability, marker::
         NodeRef {
             height: self.node.height - 1,
             node: unsafe { *self.node.as_internal().edges.get_unchecked(self.idx) },
+            root: self.node.root,
             _marker: PhantomData
         }
     }
@@ -532,6 +557,13 @@ impl<'a, K: 'a, V: 'a, NodeType> Handle<NodeRef<'a, K, V, marker::Mut, NodeType>
     pub fn into_kv_mut(self) -> (&'a mut K, &'a mut V) {
         let (mut keys, mut vals) = self.node.into_slices_mut();
         unsafe {
+            (keys.get_unchecked_mut(self.idx), vals.get_unchecked_mut(self.idx))
+        }
+    }
+
+    pub fn kv_mut(&mut self) -> (&mut K, &mut V) {
+        unsafe {
+            let (mut keys, mut vals) = self.node.reborrow_mut().into_slices_mut();
             (keys.get_unchecked_mut(self.idx), vals.get_unchecked_mut(self.idx))
         }
     }
@@ -603,26 +635,19 @@ impl<'a, K: 'a, V: 'a> Handle<NodeRef<'a, K, V, marker::Mut, marker::Internal>, 
             self.node.as_leaf_mut().len = self.idx as u16;
             new_node.data.len = new_len as u16;
 
-            let new_node = BoxedNode::from_internal(new_node);
-            {
-                let mut new_ref = NodeRef {
-                    node: new_node,
-                    height: height,
-                    _marker: PhantomData
-                };
-                
-                for i in 0..(new_len+1) {
-                    Handle::new(new_ref.reborrow_mut(), i).correct_parent_link();
-                }
+            let mut new_root = Root {
+                node: BoxedNode::from_internal(new_node),
+                height: height
+            };
+            
+            for i in 0..(new_len+1) {
+                Handle::new(new_root.as_mut().cast_unchecked(), i).correct_parent_link();
             }
 
             (
                 self.node,
                 k, v,
-                Root {
-                    node: new_node,
-                    height: height
-                }
+                new_root
             )
         }
     }

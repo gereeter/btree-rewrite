@@ -11,7 +11,7 @@ use search;
 use node::InsertResult::*;
 use node::ForceResult::*;
 use search::SearchResult::*;
-
+use self::Entry::*;
 
 /// A map based on a B-Tree.
 ///
@@ -51,6 +51,27 @@ pub struct BTreeMap<K, V> {
 /// An iterator over a BTreeMap's entries.
 pub struct Iter<'a, K: 'a, V: 'a> {
     handle: Handle<NodeRef<'a, K, V, marker::Immut, marker::Leaf>, marker::Edge>
+}
+
+/// A view into a single entry in a map, which may either be vacant or occupied.
+pub enum Entry<'a, K: 'a, V: 'a> {
+    /// A vacant Entry
+    Vacant(VacantEntry<'a, K, V>),
+
+    /// An occupied Entry
+    Occupied(OccupiedEntry<'a, K, V>),
+}
+
+/// A vacant Entry.
+pub struct VacantEntry<'a, K: 'a, V: 'a> {
+    key: K,
+    handle: Handle<NodeRef<'a, K, V, marker::Mut, marker::Leaf>, marker::Edge>,
+    length: &'a mut usize
+}
+
+/// An occupied Entry.
+pub struct OccupiedEntry<'a, K:'a, V:'a> {
+    handle: Handle<NodeRef<'a, K, V, marker::Mut, marker::LeafOrInternal>, marker::KV>
 }
 
 impl<K: Debug, V: Debug> BTreeMap<K, V> {
@@ -192,47 +213,42 @@ impl<K: Ord, V> BTreeMap<K, V> {
     /// assert_eq!(map[&37], "c");
     /// ```
     pub fn insert(&mut self, key: K, value: V) -> Option<V> {
-        let mut ins_k;
-        let mut ins_v;
-        let mut ins_edge;
-
-        {
-            let insert_point = match search::search_tree(self.root.as_mut(), &key) {
-                Found(handle) => return Some(mem::replace(handle.into_kv_mut().1, value)),
-                GoDown(insert_point) => insert_point
-            };
-
-            self.length += 1;
-
-            let mut cur_parent = match insert_point.insert(key, value) {
-                Fit(_) => return None,
-                Split(left, k, v, right) => {
-                    ins_k = k;
-                    ins_v = v;
-                    ins_edge = right;
-                    left.ascend().ok()
-                }
-            };
-
-            loop {
-                match cur_parent {
-                    Some(parent) => match parent.insert(ins_k, ins_v, ins_edge) {
-                        Fit(_) => return None,
-                        Split(left, k, v, right) => {
-                            ins_k = k;
-                            ins_v = v;
-                            ins_edge = right;
-                            cur_parent = left.ascend().ok();
-                        }
-                    },
-                    None => break
-                }
+        match self.entry(key) {
+            Occupied(mut entry) => Some(entry.insert(value)),
+            Vacant(mut entry) => {
+                entry.insert(value);
+                None
             }
         }
+    }
 
-        self.root.enlarge().push(ins_k, ins_v, ins_edge);
-
-        None
+    /// Gets the given key's corresponding entry in the map for in-place manipulation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::collections::BTreeMap;
+    ///
+    /// let mut count: BTreeMap<&str, usize> = BTreeMap::new();
+    ///
+    /// // count the number of occurrences of letters in the vec
+    /// for x in vec!["a","b","a","c","a","b"] {
+    ///     *count.entry(x).or_insert(0) += 1;
+    /// }
+    ///
+    /// assert_eq!(count["a"], 3);
+    /// ```
+    pub fn entry(&mut self, key: K) -> Entry<K, V> {
+        match search::search_tree(self.root.as_mut(), &key) {
+            Found(handle) => Occupied(OccupiedEntry {
+                handle: handle
+            }),
+            GoDown(handle) => Vacant(VacantEntry {
+                key: key,
+                handle: handle,
+                length: &mut self.length
+            })
+        }
     }
 }
 
@@ -344,4 +360,90 @@ impl<K, V> BTreeMap<K, V> {
     /// assert!(!a.is_empty());
     /// ```
     pub fn is_empty(&self) -> bool { self.len() == 0 }
+}
+
+impl<'a, K: Ord, V> Entry<'a, K, V> {
+    /// Ensures a value is in the entry by inserting the default if empty, and returns
+    /// a mutable reference to the value in the entry.
+    pub fn or_insert(self, default: V) -> &'a mut V {
+        match self {
+            Occupied(entry) => entry.into_mut(),
+            Vacant(entry) => entry.insert(default),
+        }
+    }
+
+    /// Ensures a value is in the entry by inserting the result of the default function if empty,
+    /// and returns a mutable reference to the value in the entry.
+    pub fn or_insert_with<F: FnOnce() -> V>(self, default: F) -> &'a mut V {
+        match self {
+            Occupied(entry) => entry.into_mut(),
+            Vacant(entry) => entry.insert(default()),
+        }
+    }
+}
+
+impl<'a, K: Ord, V> VacantEntry<'a, K, V> {
+    /// Sets the value of the entry with the VacantEntry's key,
+    /// and returns a mutable reference to it.
+    pub fn insert(self, value: V) -> &'a mut V {
+        *self.length += 1;
+
+        let out_ptr;
+
+        let mut ins_k;
+        let mut ins_v;
+        let mut ins_edge;
+
+        let mut cur_parent = match self.handle.insert(self.key, value) {
+            (Fit(handle), _) => return handle.into_kv_mut().1,
+            (Split(left, k, v, right), ptr) => {
+                ins_k = k;
+                ins_v = v;
+                ins_edge = right;
+                out_ptr = ptr;
+                left.ascend().map_err(|n| n.into_root_mut())
+            }
+        };
+
+        loop {
+            match cur_parent {
+                Ok(parent) => match parent.insert(ins_k, ins_v, ins_edge) {
+                    Fit(_) => return unsafe { &mut *out_ptr },
+                    Split(left, k, v, right) => {
+                        ins_k = k;
+                        ins_v = v;
+                        ins_edge = right;
+                        cur_parent = left.ascend().map_err(|n| n.into_root_mut());
+                    }
+                },
+                Err(root) => {
+                    root.enlarge().push(ins_k, ins_v, ins_edge);
+                    return unsafe { &mut *out_ptr };
+                }
+            }
+        }
+    }
+}
+
+impl<'a, K: Ord, V> OccupiedEntry<'a, K, V> {
+    /// Gets a reference to the value in the entry.
+    pub fn get(&self) -> &V {
+        self.handle.reborrow().into_kv().1
+    }
+
+    /// Gets a mutable reference to the value in the entry.
+    pub fn get_mut(&mut self) -> &mut V {
+        self.handle.kv_mut().1
+    }
+
+    /// Converts the entry into a mutable reference to its value.
+    pub fn into_mut(self) -> &'a mut V {
+        self.handle.into_kv_mut().1
+    }
+
+    /// Sets the value of the entry with the OccupiedEntry's key,
+    /// and returns the entry's old value.
+    pub fn insert(&mut self, value: V) -> V {
+        mem::replace(self.get_mut(), value)
+    }
 }
