@@ -201,7 +201,15 @@ impl<'a, K: 'a, V: 'a> NodeRef<'a, K, V, marker::Mut, marker::Internal> {
 
 
 impl<'a, K: 'a, V: 'a, Mutability, Type> NodeRef<'a, K, V, Mutability, Type> {
-    fn len(&self) -> usize {
+    pub fn height(&self) -> usize {
+        self.height
+    }
+
+    pub fn parent_idx(&self) -> usize {
+        self.as_leaf().parent_idx as usize
+    }
+
+    pub fn len(&self) -> usize {
         self.as_leaf().len as usize
     }
 
@@ -262,6 +270,23 @@ impl<'a, K: 'a, V: 'a, Mutability, Type> NodeRef<'a, K, V, Mutability, Type> {
                 idx: self.as_leaf().parent_idx as usize,
                 _marker: PhantomData
             })
+        }
+    }
+
+    pub fn first_edge(self) -> Handle<Self, marker::Edge> {
+        unsafe { Handle::new(self, 0) }
+    }
+
+    pub fn last_edge(self) -> Handle<Self, marker::Edge> {
+        let len = self.len();
+        unsafe { Handle::new(self, len) }
+    }
+
+    pub fn ignore_type(self) -> NodeRef<'a, K, V, Mutability, marker::LeafOrInternal> {
+        NodeRef {
+            height: self.height,
+            node: self.node,
+            _marker: PhantomData
         }
     }
 }
@@ -379,6 +404,46 @@ impl<Node, Type> Handle<Node, Type> {
     }
 }
 
+impl<'a, K: 'a, V: 'a, Mutability, NodeType, HandleType> Handle<NodeRef<'a, K, V, Mutability, NodeType>, HandleType> {
+    pub fn ignore_type(self) -> Handle<NodeRef<'a, K, V, Mutability, marker::LeafOrInternal>, HandleType> {
+        unsafe {
+            Handle::new(self.node.ignore_type(), self.idx)
+        }
+    }
+}
+
+impl<Node> Handle<Node, marker::KV> {
+    pub fn left_edge(self) -> Handle<Node, marker::Edge> {
+        unsafe { Handle::new(self.node, self.idx) }
+    }
+
+    pub fn right_edge(self) -> Handle<Node, marker::Edge> {
+        unsafe { Handle::new(self.node, self.idx + 1) }
+    }
+}
+
+impl<'a, K: 'a, V: 'a, Mutability, NodeType> Handle<NodeRef<'a, K, V, Mutability, NodeType>, marker::Edge> {
+    pub fn left_kv(self) -> Result<Handle<NodeRef<'a, K, V, Mutability, NodeType>, marker::KV>, Self> {
+        if self.idx > 0 {
+            unsafe {
+                Ok(Handle::new(self.node, self.idx - 1))
+            }
+        } else {
+            Err(self)
+        }
+    }
+
+    pub fn right_kv(self) -> Result<Handle<NodeRef<'a, K, V, Mutability, NodeType>, marker::KV>, Self> {
+        if self.idx < self.node.len() {
+            unsafe {
+                Ok(Handle::new(self.node, self.idx))
+            }
+        } else {
+            Err(self)
+        }
+    }
+}
+
 impl<'a, K: 'a, V: 'a> Handle<NodeRef<'a, K, V, marker::Mut, marker::Leaf>, marker::Edge> {
     unsafe fn insert_unchecked(&mut self, key: K, val: V) {
         slice_insert(self.node.keys_mut(), self.idx, key);
@@ -429,7 +494,9 @@ impl<'a, K: 'a, V: 'a> Handle<NodeRef<'a, K, V, marker::Mut, marker::Internal>, 
         slice_insert(slice::from_raw_parts_mut(self.node.as_internal_mut().edges.as_mut_ptr(), self.node.len()), self.idx + 1, edge.node);
         mem::forget(edge);
 
-        Handle::new(self.node.reborrow_mut(), self.idx + 1).correct_parent_link();
+        for i in (self.idx+1)..(self.node.len()+1) {
+            Handle::new(self.node.reborrow_mut(), i).correct_parent_link();
+        }
     }
 
     pub fn insert(mut self, key: K, val: V, edge: Root<K, V>) -> InsertResult<'a, K, V, marker::Internal> {

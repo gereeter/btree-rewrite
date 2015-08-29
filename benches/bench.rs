@@ -58,6 +58,29 @@ macro_rules! map_insert_seq_bench {
     )
 }
 
+macro_rules! map_iter_bench {
+    ($name: ident, $n: expr, $map: ident) => (
+        #[bench]
+        fn $name(b: &mut ::test::Bencher) {
+            use rand::{thread_rng, Rng};
+            use test::black_box;
+
+            let mut map = $map::<i32, i32>::new();
+            let mut rng = thread_rng();
+
+            for _ in 0..$n {
+                map.insert(rng.gen(), rng.gen());
+            }
+
+            b.iter(|| {
+                for entry in map.iter() {
+                    black_box(entry);
+                }
+            });
+        }
+    )
+}
+
 use btree::BTreeMap as ApaselMap;
 use btree_rewrite::BTreeMap as ParentMap;
 use std::collections::BTreeMap as StdMap;
@@ -87,3 +110,13 @@ map_insert_seq_bench!{seq_10000_std      ,  10_000, StdMap}
 map_insert_seq_bench!{seq_100_apasel     ,     100, ApaselMap}
 map_insert_seq_bench!{seq_100_parent     ,     100, ParentMap}
 map_insert_seq_bench!{seq_100_std        ,     100, StdMap}
+
+map_iter_bench!{iter_100000_apasel, 100_000, ApaselMap}
+map_iter_bench!{iter_100000_parent, 100_000, ParentMap}
+map_iter_bench!{iter_100000_std   , 100_000, StdMap}
+map_iter_bench!{iter_1000_apasel  ,    1000, ApaselMap}
+map_iter_bench!{iter_1000_parent  ,    1000, ParentMap}
+map_iter_bench!{iter_1000_std     ,    1000, StdMap}
+map_iter_bench!{iter_20_apasel    ,      20, ApaselMap}
+map_iter_bench!{iter_20_parent    ,      20, ParentMap}
+map_iter_bench!{iter_20_std       ,      20, StdMap}

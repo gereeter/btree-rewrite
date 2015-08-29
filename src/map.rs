@@ -1,11 +1,15 @@
 
+use std::io::{stderr, Write};
+use std::fmt::Debug;
+
 use collections::borrow::Borrow;
 use core::mem;
 
-use node;
+use node::{self, NodeRef, Handle, marker};
 use search;
 
 use node::InsertResult::*;
+use node::ForceResult::*;
 use search::SearchResult::*;
 
 
@@ -42,6 +46,37 @@ use search::SearchResult::*;
 pub struct BTreeMap<K, V> {
     root: node::Root<K, V>,
     length: usize
+}
+
+/// An iterator over a BTreeMap's entries.
+pub struct Iter<'a, K: 'a, V: 'a> {
+    handle: Handle<NodeRef<'a, K, V, marker::Immut, marker::Leaf>, marker::Edge>
+}
+
+impl<K: Debug, V: Debug> BTreeMap<K, V> {
+    pub fn dump(&self) {
+        fn dump_node<'a, K: Debug + 'a, V: Debug + 'a>(node: NodeRef<'a, K, V, marker::Immut, marker::LeafOrInternal>, max_height: usize) {
+            let indent = (max_height - node.height()) * 2;
+            for i in 0..indent { write!(stderr(), " "); }
+            writeln!(stderr(), "At node with height {}, idx {}", node.height(), node.parent_idx());
+            for i in 0..indent { write!(stderr(), " "); }
+            writeln!(stderr(), "Keys: {:?}", node.keys());
+            for i in 0..indent { write!(stderr(), " "); }
+            writeln!(stderr(), "Vals: {:?}", node.vals());
+
+            if let Internal(node) = node.force() {
+                writeln!(stderr(), "");
+                for i in 0..(node.len()+1) {
+                    let handle = unsafe { Handle::new(node, i) };
+                    dump_node(handle.descend(), max_height);
+                }
+            }
+            for i in 0..indent { write!(stderr(), " "); }
+            writeln!(stderr(), "Done with node at height {}", node.height());
+            writeln!(stderr(), "");
+        }
+        dump_node(self.root.as_ref(), self.root.as_ref().height());
+    }
 }
 
 impl<K: Ord, V> BTreeMap<K, V> {
@@ -201,7 +236,78 @@ impl<K: Ord, V> BTreeMap<K, V> {
     }
 }
 
+impl<'a, K: 'a, V: 'a> IntoIterator for &'a BTreeMap<K, V> {
+    type Item = (&'a K, &'a V);
+    type IntoIter = Iter<'a, K, V>;
+
+    fn into_iter(self) -> Iter<'a, K, V> {
+        self.iter()
+    }
+}
+
+impl<'a, K: 'a, V: 'a> Iterator for Iter<'a, K, V> {
+    type Item = (&'a K, &'a V);
+
+    fn next(&mut self) -> Option<(&'a K, &'a V)> {
+        let mut cur_handle = self.handle.ignore_type();
+
+        loop {
+            match cur_handle.right_kv() {
+                Ok(kv) => {
+                    let ret = kv.into_kv();
+                    self.handle = first_leaf_edge(kv.right_edge());
+                    return Some(ret);
+                },
+                Err(last_edge) => {
+                    match last_edge.into_node().ascend() {
+                        Ok(new_handle) => {
+                            cur_handle = new_handle.ignore_type();
+                        },
+                        Err(_) => return None
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn first_leaf_edge<'a, K: 'a, V: 'a, Mutability>(mut edge: Handle<NodeRef<'a, K, V, Mutability, marker::LeafOrInternal>, marker::Edge>) -> Handle<NodeRef<'a, K, V, Mutability, marker::Leaf>, marker::Edge> {
+    loop {
+        match edge.force() {
+            Leaf(leaf) => return leaf,
+            Internal(internal) => {
+                edge = internal.descend().first_edge();
+            }
+        }
+    }
+}
+
 impl<K, V> BTreeMap<K, V> {
+    /// Gets an iterator over the entries of the map.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::collections::BTreeMap;
+    ///
+    /// let mut map = BTreeMap::new();
+    /// map.insert(1, "a");
+    /// map.insert(2, "b");
+    /// map.insert(3, "c");
+    ///
+    /// for (key, value) in map.iter() {
+    ///     println!("{}: {}", key, value);
+    /// }
+    ///
+    /// let (first_key, first_value) = map.iter().next().unwrap();
+    /// assert_eq!((*first_key, *first_value), (1, "a"));
+    /// ```
+    pub fn iter(&self) -> Iter<K, V> {
+        Iter {
+            handle: first_leaf_edge(self.root.as_ref().first_edge())
+        }
+    }
+
     /// Returns the number of elements in the map.
     ///
     /// # Examples
