@@ -91,14 +91,14 @@ fn test_iter() {
     }
     log.sort();
 
-    fn test<T>(size: usize, mut iter: T, log: Vec<(usize, usize)>) where T: Iterator<Item=(usize, usize)> {
-        for (i, kv) in log.into_iter().enumerate() {
-            println!("{}: kv={:?}", i, kv);
+    fn test<T>(size: usize, mut iter: T, log: &Vec<(usize, usize)>) where T: Iterator<Item=(usize, usize)> {
+        for (i, kv) in log.iter().cloned().enumerate() {
 //            assert_eq!(iter.size_hint(), (size - i, Some(size - i)));
             assert_eq!(iter.next().unwrap(), kv);
         }
 //        assert_eq!(iter.size_hint(), (0, Some(0)));
         assert_eq!(iter.next(), None);
     }
-    test(size, map.iter().map(|(&k, &v)| (k, v)), log);
+    test(size, map.iter().map(|(&k, &v)| (k, v)), &log);
+    test(size, map.iter_mut().map(|(&k, &mut v)| (k, v)), &log);
 }

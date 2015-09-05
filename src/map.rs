@@ -1,9 +1,9 @@
-
 use std::io::{stderr, Write};
 use std::fmt::Debug;
 
 use collections::borrow::Borrow;
 use core::mem;
+use core::ptr;
 
 use node::{self, NodeRef, Handle, marker};
 use search;
@@ -50,7 +50,17 @@ pub struct BTreeMap<K, V> {
 
 /// An iterator over a BTreeMap's entries.
 pub struct Iter<'a, K: 'a, V: 'a> {
-    handle: Handle<NodeRef<'a, K, V, marker::Immut, marker::Leaf>, marker::Edge>
+    handle: Option<Handle<NodeRef<'a, K, V, marker::Immut, marker::Leaf>, marker::Edge>>
+}
+
+/// A mutable iterator over a BTreeMap's entries.
+pub struct IterMut<'a, K: 'a, V: 'a> {
+    handle: Option<Handle<NodeRef<'a, K, V, marker::Mut, marker::Leaf>, marker::Edge>>
+}
+
+/// An owning iterator over a BTreeMap's entries.
+pub struct IntoIter<'a, K: 'a, V: 'a> {
+    handle: Option<Handle<NodeRef<'a, K, V, marker::Mut, marker::Leaf>, marker::Edge>>
 }
 
 /// A view into a single entry in a map, which may either be vacant or occupied.
@@ -215,7 +225,7 @@ impl<K: Ord, V> BTreeMap<K, V> {
     pub fn insert(&mut self, key: K, value: V) -> Option<V> {
         match self.entry(key) {
             Occupied(mut entry) => Some(entry.insert(value)),
-            Vacant(mut entry) => {
+            Vacant(entry) => {
                 entry.insert(value);
                 None
             }
@@ -265,10 +275,15 @@ impl<'a, K: 'a, V: 'a> Iterator for Iter<'a, K, V> {
     type Item = (&'a K, &'a V);
 
     fn next(&mut self) -> Option<(&'a K, &'a V)> {
-        let mut cur_handle = match self.handle.right_kv() {
+        let handle = match self.handle.take() {
+            Some(handle) => handle,
+            None => return None
+        };
+
+        let mut cur_handle = match handle.right_kv() {
             Ok(kv) => {
                 let ret = kv.into_kv();
-                self.handle = kv.right_edge();
+                self.handle = Some(kv.right_edge());
                 return Some(ret);
             },
             Err(last_edge) => match last_edge.into_node().ascend() {
@@ -281,8 +296,54 @@ impl<'a, K: 'a, V: 'a> Iterator for Iter<'a, K, V> {
             match cur_handle.right_kv() {
                 Ok(kv) => {
                     let ret = kv.into_kv();
-                    self.handle = first_leaf_edge(kv.right_edge().descend());
+                    self.handle = Some(first_leaf_edge(kv.right_edge().descend()));
                     return Some(ret);
+                },
+                Err(last_edge) => match last_edge.into_node().ascend() {
+                    Ok(new_handle) => cur_handle = new_handle,
+                    Err(_) => return None
+                }
+            }
+        }
+    }
+}
+
+impl<'a, K: 'a, V: 'a> IntoIterator for &'a mut BTreeMap<K, V> {
+    type Item = (&'a K, &'a mut V);
+    type IntoIter = IterMut<'a, K, V>;
+
+    fn into_iter(self) -> IterMut<'a, K, V> {
+        self.iter_mut()
+    }
+}
+
+impl<'a, K: 'a, V: 'a> Iterator for IterMut<'a, K, V> {
+    type Item = (&'a K, &'a mut V);
+
+    fn next(&mut self) -> Option<(&'a K, &'a mut V)> {
+        let handle = match self.handle.take() {
+            Some(handle) => handle,
+            None => return None
+        };
+
+        let mut cur_handle = match handle.right_kv() {
+            Ok(kv) => {
+                let (k, v) = unsafe { ptr::read(&kv).into_kv_mut() };
+                self.handle = Some(kv.right_edge());
+                return Some((k, v));
+            },
+            Err(last_edge) => match last_edge.into_node().ascend() {
+                Ok(handle) => handle,
+                Err(_) => return None
+            }
+        };
+
+        loop {
+            match cur_handle.right_kv() {
+                Ok(kv) => {
+                    let (k, v) = unsafe { ptr::read(&kv).into_kv_mut () };
+                    self.handle = Some(first_leaf_edge(kv.right_edge().descend()));
+                    return Some((k, v));
                 },
                 Err(last_edge) => match last_edge.into_node().ascend() {
                     Ok(new_handle) => cur_handle = new_handle,
@@ -326,7 +387,32 @@ impl<K, V> BTreeMap<K, V> {
     /// ```
     pub fn iter(&self) -> Iter<K, V> {
         Iter {
-            handle: first_leaf_edge(self.root.as_ref())
+            handle: Some(first_leaf_edge(self.root.as_ref()))
+        }
+    }
+
+    /// Gets a mutable iterator over the entries of the map.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::collections::BTreeMap;
+    ///
+    /// let mut map = BTreeMap::new();
+    /// map.insert("a", 1);
+    /// map.insert("b", 2);
+    /// map.insert("c", 3);
+    ///
+    /// // add 10 to the value if the key isn't "a"
+    /// for (key, value) in map.iter_mut() {
+    ///     if key != &"a" {
+    ///         *value += 10;
+    ///     }
+    /// }
+    /// ```
+    pub fn iter_mut(&mut self) -> IterMut<K, V> {
+        IterMut {
+            handle: Some(first_leaf_edge(self.root.as_mut()))
         }
     }
 
