@@ -101,4 +101,5 @@ fn test_iter() {
     }
     test(size, map.iter().map(|(&k, &v)| (k, v)), &log);
     test(size, map.iter_mut().map(|(&k, &mut v)| (k, v)), &log);
+    test(size, map.into_iter(), &log);
 }

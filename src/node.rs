@@ -97,34 +97,6 @@ pub struct Root<K, V> {
     height: usize
 }
 
-impl<K, V> Drop for Root<K, V> {
-    fn drop(&mut self) {
-        unsafe fn drop_node<K, V>(mut node: NodeRef<marker::Borrowed, K, V, marker::Mut, marker::LeafOrInternal>) {
-            for k in node.keys_mut() {
-                drop_in_place(k);
-            }
-            for v in node.vals_mut() {
-                drop_in_place(v);
-            }
-
-            match node.force() {
-                ForceResult::Leaf(leaf) => heap::deallocate(*leaf.node.ptr, mem::size_of::<LeafNode<K, V>>(), mem::align_of::<LeafNode<K, V>>()),
-                ForceResult::Internal(mut internal) => {
-                    for i in 0..(internal.len()+1) {
-                        drop_node(Handle::new(internal.reborrow_mut(), i).descend());
-                    }
-                
-                    heap::deallocate(*internal.node.ptr, mem::size_of::<InternalNode<K, V>>(), mem::align_of::<InternalNode<K, V>>());
-                }
-            }
-        }
-
-        unsafe {
-            drop_node(self.as_mut());
-        }
-    }
-}
-
 impl<K, V> Root<K, V> {
     pub fn new_leaf() -> Self {
         Root {
@@ -147,6 +119,15 @@ impl<K, V> Root<K, V> {
             height: self.height,
             node: self.node,
             root: self as *mut _,
+            _marker: PhantomData,
+        }
+    }
+
+    pub fn into_ref(self) -> NodeRef<marker::Owned, K, V, marker::Mut, marker::LeafOrInternal> {
+        NodeRef {
+            height: self.height,
+            node: self.node,
+            root: ptr::null_mut(), // TODO: Is there anything better to do here?
             _marker: PhantomData,
         }
     }
@@ -271,6 +252,24 @@ impl<Lifetime, K, V, Mutability, Type> NodeRef<Lifetime, K, V, Mutability, Type>
     pub fn last_edge(self) -> Handle<Self, marker::Edge> {
         let len = self.len();
         unsafe { Handle::new(self, len) }
+    }
+}
+
+impl<K, V> NodeRef<marker::Owned, K, V, marker::Mut, marker::Leaf> {
+    pub unsafe fn deallocate_and_ascend(mut self) -> Option<Handle<NodeRef<marker::Owned, K, V, marker::Mut, marker::Internal>, marker::Edge>> {
+        let ptr = self.as_leaf_mut() as *mut LeafNode<K, V> as *mut u8;
+        let ret = self.ascend().ok();
+        heap::deallocate(ptr, mem::size_of::<LeafNode<K, V>>(), mem::align_of::<LeafNode<K, V>>());
+        ret
+    }
+}
+
+impl<K, V> NodeRef<marker::Owned, K, V, marker::Mut, marker::Internal> {
+    pub unsafe fn deallocate_and_ascend(mut self) -> Option<Handle<NodeRef<marker::Owned, K, V, marker::Mut, marker::Internal>, marker::Edge>> {
+        let ptr = self.as_internal_mut() as *mut InternalNode<K, V> as *mut u8;
+        let ret = self.ascend().ok();
+        heap::deallocate(ptr, mem::size_of::<InternalNode<K, V>>(), mem::align_of::<InternalNode<K, V>>());
+        ret
     }
 }
 

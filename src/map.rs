@@ -48,6 +48,14 @@ pub struct BTreeMap<K, V> {
     length: usize
 }
 
+impl<K, V> Drop for BTreeMap<K, V> {
+    fn drop(&mut self) {
+        unsafe {
+            for _ in ptr::read(self).into_iter() { }
+        }
+    }
+}
+
 /// An iterator over a BTreeMap's entries.
 pub struct Iter<'a, K: 'a, V: 'a> {
     handle: Option<Handle<NodeRef<marker::Borrowed<'a>, K, V, marker::Immut, marker::Leaf>, marker::Edge>>
@@ -348,6 +356,59 @@ impl<'a, K: 'a, V: 'a> Iterator for IterMut<'a, K, V> {
                 Err(last_edge) => match last_edge.into_node().ascend() {
                     Ok(new_handle) => cur_handle = new_handle,
                     Err(_) => return None
+                }
+            }
+        }
+    }
+}
+
+impl<K, V> IntoIterator for BTreeMap<K, V> {
+    type Item = (K, V);
+    type IntoIter = IntoIter<K, V>;
+
+    fn into_iter(self) -> IntoIter<K, V> {
+        let root = unsafe { ptr::read(&self.root) };
+        mem::forget(self);
+    
+        IntoIter {
+            handle: Some(first_leaf_edge(root.into_ref()))
+        }
+    }
+}
+
+impl<K, V> Iterator for IntoIter<K, V> {
+    type Item = (K, V);
+
+    fn next(&mut self) -> Option<(K, V)> {
+        let handle = match self.handle.take() {
+            Some(handle) => handle,
+            None => return None
+        };
+
+        let mut cur_handle = match handle.right_kv() {
+            Ok(kv) => {
+                let k = unsafe { ptr::read(kv.reborrow().into_kv().0) };
+                let v = unsafe { ptr::read(kv.reborrow().into_kv().1) };
+                self.handle = Some(kv.right_edge());
+                return Some((k, v));
+            },
+            Err(last_edge) => match unsafe { last_edge.into_node().deallocate_and_ascend() } {
+                Some(handle) => handle,
+                None => return None
+            }
+        };
+
+        loop {
+            match cur_handle.right_kv() {
+                Ok(kv) => {
+                    let k = unsafe { ptr::read(kv.reborrow().into_kv().0) };
+                    let v = unsafe { ptr::read(kv.reborrow().into_kv().1) };
+                    self.handle = Some(first_leaf_edge(kv.right_edge().descend()));
+                    return Some((k, v));
+                },
+                Err(last_edge) => match unsafe { last_edge.into_node().deallocate_and_ascend() } {
+                    Some(new_handle) => cur_handle = new_handle,
+                    None => return None
                 }
             }
         }
