@@ -50,17 +50,17 @@ pub struct BTreeMap<K, V> {
 
 /// An iterator over a BTreeMap's entries.
 pub struct Iter<'a, K: 'a, V: 'a> {
-    handle: Option<Handle<NodeRef<'a, K, V, marker::Immut, marker::Leaf>, marker::Edge>>
+    handle: Option<Handle<NodeRef<marker::Borrowed<'a>, K, V, marker::Immut, marker::Leaf>, marker::Edge>>
 }
 
 /// A mutable iterator over a BTreeMap's entries.
 pub struct IterMut<'a, K: 'a, V: 'a> {
-    handle: Option<Handle<NodeRef<'a, K, V, marker::Mut, marker::Leaf>, marker::Edge>>
+    handle: Option<Handle<NodeRef<marker::Borrowed<'a>, K, V, marker::Mut, marker::Leaf>, marker::Edge>>
 }
 
 /// An owning iterator over a BTreeMap's entries.
-pub struct IntoIter<'a, K: 'a, V: 'a> {
-    handle: Option<Handle<NodeRef<'a, K, V, marker::Mut, marker::Leaf>, marker::Edge>>
+pub struct IntoIter<K, V> {
+    handle: Option<Handle<NodeRef<marker::Owned, K, V, marker::Mut, marker::Leaf>, marker::Edge>>
 }
 
 /// A view into a single entry in a map, which may either be vacant or occupied.
@@ -75,18 +75,18 @@ pub enum Entry<'a, K: 'a, V: 'a> {
 /// A vacant Entry.
 pub struct VacantEntry<'a, K: 'a, V: 'a> {
     key: K,
-    handle: Handle<NodeRef<'a, K, V, marker::Mut, marker::Leaf>, marker::Edge>,
+    handle: Handle<NodeRef<marker::Borrowed<'a>, K, V, marker::Mut, marker::Leaf>, marker::Edge>,
     length: &'a mut usize
 }
 
 /// An occupied Entry.
-pub struct OccupiedEntry<'a, K:'a, V:'a> {
-    handle: Handle<NodeRef<'a, K, V, marker::Mut, marker::LeafOrInternal>, marker::KV>
+pub struct OccupiedEntry<'a, K: 'a, V: 'a> {
+    handle: Handle<NodeRef<marker::Borrowed<'a>, K, V, marker::Mut, marker::LeafOrInternal>, marker::KV>
 }
 
 impl<K: Debug, V: Debug> BTreeMap<K, V> {
     pub fn dump(&self) {
-        fn dump_node<'a, K: Debug + 'a, V: Debug + 'a>(node: NodeRef<'a, K, V, marker::Immut, marker::LeafOrInternal>, max_height: usize) {
+        fn dump_node<'a, K: Debug + 'a, V: Debug + 'a>(node: NodeRef<marker::Borrowed<'a>, K, V, marker::Immut, marker::LeafOrInternal>, max_height: usize) {
             let indent = (max_height - node.height()) * 2;
             for _ in 0..indent { write!(stderr(), " ").unwrap(); }
             writeln!(stderr(), "At node with height {}, idx {}", node.height(), node.parent_idx()).unwrap();
@@ -354,7 +354,7 @@ impl<'a, K: 'a, V: 'a> Iterator for IterMut<'a, K, V> {
     }
 }
 
-fn first_leaf_edge<'a, K: 'a, V: 'a, Mutability>(mut node: NodeRef<'a, K, V, Mutability, marker::LeafOrInternal>) -> Handle<NodeRef<'a, K, V, Mutability, marker::Leaf>, marker::Edge> {
+fn first_leaf_edge<Lifetime, K, V, Mutability>(mut node: NodeRef<Lifetime, K, V, Mutability, marker::LeafOrInternal>) -> Handle<NodeRef<Lifetime, K, V, Mutability, marker::Leaf>, marker::Edge> {
     loop {
         match node.force() {
             Leaf(leaf) => return leaf.first_edge(),
