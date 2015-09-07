@@ -2,6 +2,7 @@ use std::io::{stderr, Write};
 use std::fmt::Debug;
 
 use collections::borrow::Borrow;
+use core::intrinsics;
 use core::mem;
 use core::ptr;
 
@@ -237,6 +238,66 @@ impl<K: Ord, V> BTreeMap<K, V> {
                 entry.insert(value);
                 None
             }
+        }
+    }
+
+
+    /// Removes a key from the map, returning the value at the key if the key
+    /// was previously in the map.
+    ///
+    /// The key may be any borrowed form of the map's key type, but the ordering
+    /// on the borrowed form *must* match the ordering on the key type.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::collections::BTreeMap;
+    ///
+    /// let mut map = BTreeMap::new();
+    /// map.insert(1, "a");
+    /// assert_eq!(map.remove(&1), Some("a"));
+    /// assert_eq!(map.remove(&1), None);
+    /// ```
+    pub fn remove<Q: ?Sized>(&mut self, key: &Q) -> Option<V> where K: Borrow<Q>, Q: Ord {
+        match search::search_tree(self.root.as_mut(), key) {
+            Found(handle) => {
+                let (small_leaf, old_val) = match handle.force() {
+                    Leaf(leaf) => {
+                        let (hole, _, old_val) = leaf.remove();
+                        (hole.into_node(), old_val)
+                    },
+                    Internal(mut internal) => {
+                        let key_loc = internal.kv_mut().0 as *mut K;
+                        let val_loc = internal.kv_mut().1 as *mut V;
+
+                        let to_remove = match first_leaf_edge(internal.right_edge().descend()).right_kv() {
+                            Ok(to_remove) => to_remove,
+                            Err(_) => if cfg!(debug_assertions) {
+                                panic!("empty non-root node detected in BTreeMap::remove");
+                            } else {
+                                unsafe {
+                                    intrinsics::unreachable();
+                                }
+                            }
+                        };
+
+                        let (hole, key, val) = to_remove.remove();
+                        let old_val = unsafe {
+                            mem::replace(&mut *key_loc, key);
+                            mem::replace(&mut *val_loc, val)
+                        };
+
+                        (hole.into_node(), old_val)
+                    }
+                };
+
+                if small_leaf.len() < small_leaf.capacity() / 2 {
+                    unimplemented!();
+                }
+
+                Some(old_val)
+            },
+            GoDown(_) => None
         }
     }
 

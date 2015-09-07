@@ -21,7 +21,6 @@
 // Since Rust doesn't acutally have dependent types and polymorphic recursion, we make do with lots of unsafety.
 
 use alloc::heap;
-use core::intrinsics::drop_in_place;
 use core::marker::PhantomData;
 use core::mem;
 use core::nonzero::NonZero;
@@ -152,6 +151,20 @@ impl<K, V> Root<K, V> {
 
         ret
     }
+
+    pub fn shrink(&mut self) {
+        debug_assert!(self.height > 0);
+
+        let top = *self.node.ptr;
+
+        self.node = unsafe { self.as_mut().cast_unchecked::<marker::Internal>().first_edge().descend().node };
+        self.height -= 1;
+        self.as_mut().as_leaf_mut().parent = ptr::null_mut();
+
+        unsafe {
+            heap::deallocate(top, mem::size_of::<InternalNode<K, V>>(), mem::align_of::<InternalNode<K, V>>());
+        }
+    }
 }
 
 pub struct NodeRef<Lifetime, K, V, Mutability, Type> {
@@ -198,7 +211,7 @@ impl<Lifetime, K, V, Mutability, Type> NodeRef<Lifetime, K, V, Mutability, Type>
         self.as_leaf().len as usize
     }
 
-    fn capacity(&self) -> usize {
+    pub fn capacity(&self) -> usize {
         2 * T - 1
     }
 
@@ -608,6 +621,15 @@ impl<Lifetime, K, V> Handle<NodeRef<Lifetime, K, V, marker::Mut, marker::Leaf>, 
             )
         }
     }
+
+    pub fn remove(mut self) -> (Handle<NodeRef<Lifetime, K, V, marker::Mut, marker::Leaf>, marker::Edge>, K, V) {
+        unsafe {
+            let k = slice_remove(self.node.keys_mut(), self.idx);
+            let v = slice_remove(self.node.vals_mut(), self.idx);
+            self.node.as_leaf_mut().len -= 1;
+            (self.left_edge(), k, v)
+        }
+    }
 }
 
 impl<Lifetime, K, V> Handle<NodeRef<Lifetime, K, V, marker::Mut, marker::Internal>, marker::KV> {
@@ -709,4 +731,14 @@ unsafe fn slice_insert<T>(slice: &mut [T], idx: usize, val: T) {
         slice.len() - idx
     );
     ptr::write(slice.get_unchecked_mut(idx), val);
+}
+
+unsafe fn slice_remove<T>(slice: &mut [T], idx: usize) -> T {
+    let ret = ptr::read(slice.get_unchecked(idx));
+    ptr::copy(
+        slice.as_ptr().offset(idx as isize + 1),
+        slice.as_mut_ptr().offset(idx as isize),
+        slice.len() - idx - 1
+    );
+    ret
 }
