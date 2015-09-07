@@ -110,7 +110,7 @@ fn test_iter() {
     test(size, map.into_iter());
 }
 
-/*
+
 #[test]
 fn test_iter_rev() {
     let size = 10000;
@@ -127,8 +127,8 @@ fn test_iter_rev() {
         assert_eq!(iter.next(), None);
     }
     test(size, map.iter().rev().map(|(&k, &v)| (k, v)));
-    test(size, map.iter_mut().rev().map(|(&k, &mut v)| (k, v)));
-    test(size, map.into_iter().rev());
+//    test(size, map.iter_mut().rev().map(|(&k, &mut v)| (k, v)));
+//    test(size, map.into_iter().rev());
 }
 
 #[test]
@@ -153,10 +153,10 @@ fn test_iter_mixed() {
         assert_eq!(iter.next(), None);
     }
     test(size, map.iter().map(|(&k, &v)| (k, v)));
-    test(size, map.iter_mut().map(|(&k, &mut v)| (k, v)));
-    test(size, map.into_iter());
+//    test(size, map.iter_mut().map(|(&k, &mut v)| (k, v)));
+//    test(size, map.into_iter());
 }
-*/
+
 
 /*
 #[test]

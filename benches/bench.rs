@@ -82,7 +82,7 @@ macro_rules! map_iter_bench {
 }
 
 use btree::BTreeMap as ApaselMap;
-use btree_rewrite::BTreeMap as ParentMap;
+use btree_rewrite::map::BTreeMap as ParentMap;
 use std::collections::BTreeMap as StdMap;
 
 map_insert_rand_bench!{rand_1000000_apasel, 1_000_000, ApaselMap}

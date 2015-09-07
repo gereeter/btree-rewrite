@@ -62,7 +62,9 @@ impl<K, V> Drop for BTreeMap<K, V> {
 
 /// An iterator over a BTreeMap's entries.
 pub struct Iter<'a, K: 'a, V: 'a> {
-    handle: Option<Handle<NodeRef<marker::Borrowed<'a>, K, V, marker::Immut, marker::Leaf>, marker::Edge>>
+    front: Handle<NodeRef<marker::Borrowed<'a>, K, V, marker::Immut, marker::Leaf>, marker::Edge>,
+    back: Handle<NodeRef<marker::Borrowed<'a>, K, V, marker::Immut, marker::Leaf>, marker::Edge>,
+    length: usize
 }
 
 /// A mutable iterator over a BTreeMap's entries.
@@ -318,20 +320,23 @@ impl<'a, K: 'a, V: 'a> Iterator for Iter<'a, K, V> {
     type Item = (&'a K, &'a V);
 
     fn next(&mut self) -> Option<(&'a K, &'a V)> {
-        let handle = match self.handle.take() {
-            Some(handle) => handle,
-            None => return None
-        };
+        if self.length == 0 {
+            return None;
+        } else {
+            self.length -= 1;
+        }
+
+        let handle = self.front;
 
         let mut cur_handle = match handle.right_kv() {
             Ok(kv) => {
                 let ret = kv.into_kv();
-                self.handle = Some(kv.right_edge());
+                self.front = kv.right_edge();
                 return Some(ret);
             },
-            Err(last_edge) => match last_edge.into_node().ascend() {
-                Ok(handle) => handle,
-                Err(_) => return None
+            Err(last_edge) => {
+                let next_level = last_edge.into_node().ascend().ok();
+                unsafe { unwrap_unchecked(next_level) }
             }
         };
 
@@ -339,16 +344,62 @@ impl<'a, K: 'a, V: 'a> Iterator for Iter<'a, K, V> {
             match cur_handle.right_kv() {
                 Ok(kv) => {
                     let ret = kv.into_kv();
-                    self.handle = Some(first_leaf_edge(kv.right_edge().descend()));
+                    self.front = first_leaf_edge(kv.right_edge().descend());
                     return Some(ret);
                 },
-                Err(last_edge) => match last_edge.into_node().ascend() {
-                    Ok(new_handle) => cur_handle = new_handle,
-                    Err(_) => return None
+                Err(last_edge) => {
+                    let next_level = last_edge.into_node().ascend().ok();
+                    cur_handle = unsafe { unwrap_unchecked(next_level) };
                 }
             }
         }
     }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.length, Some(self.length))
+    }
+}
+
+impl<'a, K: 'a, V: 'a> DoubleEndedIterator for Iter<'a, K, V> {
+    fn next_back(&mut self) -> Option<(&'a K, &'a V)> {
+        if self.length == 0 {
+            return None;
+        } else {
+            self.length -= 1;
+        }
+
+        let handle = self.back;
+
+        let mut cur_handle = match handle.left_kv() {
+            Ok(kv) => {
+                let ret = kv.into_kv();
+                self.back = kv.left_edge();
+                return Some(ret);
+            },
+            Err(last_edge) => {
+                let next_level = last_edge.into_node().ascend().ok();
+                unsafe { unwrap_unchecked(next_level) }
+            }
+        };
+
+        loop {
+            match cur_handle.left_kv() {
+                Ok(kv) => {
+                    let ret = kv.into_kv();
+                    self.back = last_leaf_edge(kv.left_edge().descend());
+                    return Some(ret);
+                },
+                Err(last_edge) => {
+                    let next_level = last_edge.into_node().ascend().ok();
+                    cur_handle = unsafe { unwrap_unchecked(next_level) };
+                }
+            }
+        }
+    }
+}
+
+impl<'a, K: 'a, V: 'a> ExactSizeIterator for Iter<'a, K, V> {
+    fn len(&self) -> usize { self.length }
 }
 
 impl<'a, K: 'a, V: 'a> IntoIterator for &'a mut BTreeMap<K, V> {
@@ -544,6 +595,28 @@ fn first_leaf_edge<Lifetime, K, V, Mutability>(mut node: NodeRef<Lifetime, K, V,
     }
 }
 
+fn last_leaf_edge<Lifetime, K, V, Mutability>(mut node: NodeRef<Lifetime, K, V, Mutability, marker::LeafOrInternal>) -> Handle<NodeRef<Lifetime, K, V, Mutability, marker::Leaf>, marker::Edge> {
+    loop {
+        match node.force() {
+            Leaf(leaf) => return leaf.last_edge(),
+            Internal(internal) => {
+                node = internal.last_edge().descend();
+            }
+        }
+    }
+}
+
+#[inline(always)]
+unsafe fn unwrap_unchecked<T>(val: Option<T>) -> T {
+    val.unwrap_or_else(|| {
+        if cfg!(debug_assertions) {
+            panic!("'unchecked' unwrap on None in BTreeMap");
+        } else {
+            intrinsics::unreachable();
+        }
+    })
+}
+
 impl<K, V> BTreeMap<K, V> {
     /// Gets an iterator over the entries of the map.
     ///
@@ -566,7 +639,9 @@ impl<K, V> BTreeMap<K, V> {
     /// ```
     pub fn iter(&self) -> Iter<K, V> {
         Iter {
-            handle: Some(first_leaf_edge(self.root.as_ref()))
+            front: first_leaf_edge(self.root.as_ref()),
+            back: last_leaf_edge(self.root.as_ref()),
+            length: self.length
         }
     }
 
@@ -725,16 +800,8 @@ impl<'a, K: Ord, V> OccupiedEntry<'a, K, V> {
                 let key_loc = internal.kv_mut().0 as *mut K;
                 let val_loc = internal.kv_mut().1 as *mut V;
 
-                let to_remove = match first_leaf_edge(internal.right_edge().descend()).right_kv() {
-                    Ok(to_remove) => to_remove,
-                    Err(_) => if cfg!(debug_assertions) {
-                        panic!("empty non-root node detected in BTreeMap::remove");
-                    } else {
-                        unsafe {
-                            intrinsics::unreachable();
-                        }
-                    }
-                };
+                let to_remove = first_leaf_edge(internal.right_edge().descend()).right_kv().ok();
+                let to_remove = unsafe { unwrap_unchecked(to_remove) };
 
                 let (hole, key, val) = to_remove.remove();
                 let old_val = unsafe {
