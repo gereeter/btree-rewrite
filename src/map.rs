@@ -90,7 +90,8 @@ pub struct VacantEntry<'a, K: 'a, V: 'a> {
 
 /// An occupied Entry.
 pub struct OccupiedEntry<'a, K: 'a, V: 'a> {
-    handle: Handle<NodeRef<marker::Borrowed<'a>, K, V, marker::Mut, marker::LeafOrInternal>, marker::KV>
+    handle: Handle<NodeRef<marker::Borrowed<'a>, K, V, marker::Mut, marker::LeafOrInternal>, marker::KV>,
+    length: &'a mut usize
 }
 
 impl<K: Debug, V: Debug> BTreeMap<K, V> {
@@ -241,7 +242,6 @@ impl<K: Ord, V> BTreeMap<K, V> {
         }
     }
 
-
     /// Removes a key from the map, returning the value at the key if the key
     /// was previously in the map.
     ///
@@ -261,41 +261,10 @@ impl<K: Ord, V> BTreeMap<K, V> {
     pub fn remove<Q: ?Sized>(&mut self, key: &Q) -> Option<V> where K: Borrow<Q>, Q: Ord {
         match search::search_tree(self.root.as_mut(), key) {
             Found(handle) => {
-                let (small_leaf, old_val) = match handle.force() {
-                    Leaf(leaf) => {
-                        let (hole, _, old_val) = leaf.remove();
-                        (hole.into_node(), old_val)
-                    },
-                    Internal(mut internal) => {
-                        let key_loc = internal.kv_mut().0 as *mut K;
-                        let val_loc = internal.kv_mut().1 as *mut V;
-
-                        let to_remove = match first_leaf_edge(internal.right_edge().descend()).right_kv() {
-                            Ok(to_remove) => to_remove,
-                            Err(_) => if cfg!(debug_assertions) {
-                                panic!("empty non-root node detected in BTreeMap::remove");
-                            } else {
-                                unsafe {
-                                    intrinsics::unreachable();
-                                }
-                            }
-                        };
-
-                        let (hole, key, val) = to_remove.remove();
-                        let old_val = unsafe {
-                            mem::replace(&mut *key_loc, key);
-                            mem::replace(&mut *val_loc, val)
-                        };
-
-                        (hole.into_node(), old_val)
-                    }
-                };
-
-                if small_leaf.len() < small_leaf.capacity() / 2 {
-                    unimplemented!();
-                }
-
-                Some(old_val)
+                Some(OccupiedEntry {
+                    handle: handle,
+                    length: &mut self.length
+                }.remove())
             },
             GoDown(_) => None
         }
@@ -320,7 +289,8 @@ impl<K: Ord, V> BTreeMap<K, V> {
     pub fn entry(&mut self, key: K) -> Entry<K, V> {
         match search::search_tree(self.root.as_mut(), &key) {
             Found(handle) => Occupied(OccupiedEntry {
-                handle: handle
+                handle: handle,
+                length: &mut self.length
             }),
             GoDown(handle) => Vacant(VacantEntry {
                 key: key,
@@ -659,5 +629,46 @@ impl<'a, K: Ord, V> OccupiedEntry<'a, K, V> {
     /// and returns the entry's old value.
     pub fn insert(&mut self, value: V) -> V {
         mem::replace(self.get_mut(), value)
+    }
+
+    /// Takes the value of the entry out of the map, and returns it.
+    pub fn remove(self) -> V {
+        *self.length -= 1;
+
+        let (small_leaf, old_val) = match self.handle.force() {
+            Leaf(leaf) => {
+                let (hole, _, old_val) = leaf.remove();
+                (hole.into_node(), old_val)
+            },
+            Internal(mut internal) => {
+                let key_loc = internal.kv_mut().0 as *mut K;
+                let val_loc = internal.kv_mut().1 as *mut V;
+
+                let to_remove = match first_leaf_edge(internal.right_edge().descend()).right_kv() {
+                    Ok(to_remove) => to_remove,
+                    Err(_) => if cfg!(debug_assertions) {
+                        panic!("empty non-root node detected in BTreeMap::remove");
+                    } else {
+                        unsafe {
+                            intrinsics::unreachable();
+                        }
+                    }
+                };
+
+                let (hole, key, val) = to_remove.remove();
+                let old_val = unsafe {
+                    mem::replace(&mut *key_loc, key);
+                    mem::replace(&mut *val_loc, val)
+                };
+
+                (hole.into_node(), old_val)
+            }
+        };
+
+        if small_leaf.len() < small_leaf.capacity() / 2 {
+            unimplemented!();
+        }
+
+        old_val
     }
 }
