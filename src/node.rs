@@ -199,10 +199,12 @@ impl<Lifetime, K, V> NodeRef<Lifetime, K, V, marker::Mut, marker::Internal> {
 
 
 impl<Lifetime, K, V, Mutability, Type> NodeRef<Lifetime, K, V, Mutability, Type> {
+    #[cfg(test)]
     pub fn height(&self) -> usize {
         self.height
     }
 
+    #[cfg(test)]
     pub fn parent_idx(&self) -> usize {
         self.as_leaf().parent_idx as usize
     }

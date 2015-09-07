@@ -1,5 +1,5 @@
+#[cfg(test)]
 use std::io::{stderr, Write};
-
 
 use collections::borrow::Borrow;
 use core::cmp::Ordering;
@@ -97,6 +97,7 @@ pub struct OccupiedEntry<'a, K: 'a, V: 'a> {
     length: &'a mut usize
 }
 
+#[cfg(test)]
 impl<K: Debug, V: Debug> BTreeMap<K, V> {
     pub fn dump(&self) {
         fn dump_node<'a, K: Debug + 'a, V: Debug + 'a>(node: NodeRef<marker::Borrowed<'a>, K, V, marker::Immut, marker::LeafOrInternal>, max_height: usize) {
