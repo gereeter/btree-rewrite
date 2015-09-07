@@ -15,7 +15,7 @@ use search;
 use node::InsertResult::*;
 use node::ForceResult::*;
 use search::SearchResult::*;
-use self::Entry::*;
+pub use self::Entry::*;
 
 /// A map based on a B-Tree.
 ///

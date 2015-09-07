@@ -30,5 +30,3 @@ extern crate alloc;
 mod node;
 mod search;
 pub mod map;
-
-pub use map::BTreeMap;
