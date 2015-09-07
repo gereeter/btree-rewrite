@@ -1,10 +1,13 @@
 use std::io::{stderr, Write};
-use std::fmt::Debug;
+
 
 use collections::borrow::Borrow;
-use core::intrinsics;
-use core::mem;
-use core::ptr;
+use core::cmp::Ordering;
+use core::fmt::Debug;
+use core::hash::{Hash, Hasher};
+use core::iter::FromIterator;
+use core::ops::Index;
+use core::{fmt, intrinsics, mem, ptr};
 
 use node::{self, NodeRef, Handle, marker};
 use search;
@@ -449,6 +452,83 @@ impl<K, V> Iterator for IntoIter<K, V> {
                 }
             }
         }
+    }
+}
+
+impl<K: Ord, V> FromIterator<(K, V)> for BTreeMap<K, V> {
+    fn from_iter<T: IntoIterator<Item=(K, V)>>(iter: T) -> BTreeMap<K, V> {
+        let mut map = BTreeMap::new();
+        map.extend(iter);
+        map
+    }
+}
+
+impl<K: Ord, V> Extend<(K, V)> for BTreeMap<K, V> {
+    #[inline]
+    fn extend<T: IntoIterator<Item=(K, V)>>(&mut self, iter: T) {
+        for (k, v) in iter {
+            self.insert(k, v);
+        }
+    }
+}
+
+impl<'a, K: Ord + Copy, V: Copy> Extend<(&'a K, &'a V)> for BTreeMap<K, V> {
+    fn extend<I: IntoIterator<Item=(&'a K, &'a V)>>(&mut self, iter: I) {
+        self.extend(iter.into_iter().map(|(&key, &value)| (key, value)));
+    }
+}
+
+impl<K: Hash, V: Hash> Hash for BTreeMap<K, V> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        for elt in self {
+            elt.hash(state);
+        }
+    }
+}
+
+impl<K: Ord, V> Default for BTreeMap<K, V> {
+    fn default() -> BTreeMap<K, V> {
+        BTreeMap::new()
+    }
+}
+
+impl<K: PartialEq, V: PartialEq> PartialEq for BTreeMap<K, V> {
+    fn eq(&self, other: &BTreeMap<K, V>) -> bool {
+        self.len() == other.len() &&
+            self.iter().zip(other).all(|(a, b)| a == b)
+    }
+}
+
+impl<K: Eq, V: Eq> Eq for BTreeMap<K, V> {}
+
+impl<K: PartialOrd, V: PartialOrd> PartialOrd for BTreeMap<K, V> {
+    #[inline]
+    fn partial_cmp(&self, other: &BTreeMap<K, V>) -> Option<Ordering> {
+        self.iter().partial_cmp(other.iter())
+    }
+}
+
+impl<K: Ord, V: Ord> Ord for BTreeMap<K, V> {
+    #[inline]
+    fn cmp(&self, other: &BTreeMap<K, V>) -> Ordering {
+        self.iter().cmp(other.iter())
+    }
+}
+
+impl<K: Debug, V: Debug> Debug for BTreeMap<K, V> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_map().entries(self.iter()).finish()
+    }
+}
+
+impl<'a, K: Ord, Q: ?Sized, V> Index<&'a Q> for BTreeMap<K, V>
+    where K: Borrow<Q>, Q: Ord
+{
+    type Output = V;
+
+    #[inline]
+    fn index(&self, key: &Q) -> &V {
+        self.get(key).expect("no entry found for key")
     }
 }
 
