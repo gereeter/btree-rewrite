@@ -99,10 +99,10 @@ fn test_iter() {
 
     fn test<T>(size: usize, mut iter: T) where T: Iterator<Item=(usize, usize)> {
         for i in 0..size {
-//            assert_eq!(iter.size_hint(), (size - i, Some(size - i)));
+            assert_eq!(iter.size_hint(), (size - i, Some(size - i)));
             assert_eq!(iter.next().unwrap(), (i, i));
         }
-//        assert_eq!(iter.size_hint(), (0, Some(0)));
+        assert_eq!(iter.size_hint(), (0, Some(0)));
         assert_eq!(iter.next(), None);
     }
     test(size, map.iter().map(|(&k, &v)| (k, v)));
@@ -127,8 +127,8 @@ fn test_iter_rev() {
         assert_eq!(iter.next(), None);
     }
     test(size, map.iter().rev().map(|(&k, &v)| (k, v)));
-//    test(size, map.iter_mut().rev().map(|(&k, &mut v)| (k, v)));
-//    test(size, map.into_iter().rev());
+    test(size, map.iter_mut().rev().map(|(&k, &mut v)| (k, v)));
+    test(size, map.into_iter().rev());
 }
 
 #[test]
@@ -153,8 +153,8 @@ fn test_iter_mixed() {
         assert_eq!(iter.next(), None);
     }
     test(size, map.iter().map(|(&k, &v)| (k, v)));
-//    test(size, map.iter_mut().map(|(&k, &mut v)| (k, v)));
-//    test(size, map.into_iter());
+    test(size, map.iter_mut().map(|(&k, &mut v)| (k, v)));
+    test(size, map.into_iter());
 }
 
 

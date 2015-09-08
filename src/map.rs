@@ -69,12 +69,16 @@ pub struct Iter<'a, K: 'a, V: 'a> {
 
 /// A mutable iterator over a BTreeMap's entries.
 pub struct IterMut<'a, K: 'a, V: 'a> {
-    handle: Option<Handle<NodeRef<marker::Borrowed<'a>, K, V, marker::Mut, marker::Leaf>, marker::Edge>>
+    front: Handle<NodeRef<marker::Borrowed<'a>, K, V, marker::Mut, marker::Leaf>, marker::Edge>,
+    back: Handle<NodeRef<marker::Borrowed<'a>, K, V, marker::Mut, marker::Leaf>, marker::Edge>,
+    length: usize
 }
 
 /// An owning iterator over a BTreeMap's entries.
 pub struct IntoIter<K, V> {
-    handle: Option<Handle<NodeRef<marker::Owned, K, V, marker::Mut, marker::Leaf>, marker::Edge>>
+    front: Handle<NodeRef<marker::Owned, K, V, marker::Mut, marker::Leaf>, marker::Edge>,
+    back: Handle<NodeRef<marker::Owned, K, V, marker::Mut, marker::Leaf>, marker::Edge>,
+    length: usize
 }
 
 /// A view into a single entry in a map, which may either be vacant or occupied.
@@ -415,37 +419,86 @@ impl<'a, K: 'a, V: 'a> Iterator for IterMut<'a, K, V> {
     type Item = (&'a K, &'a mut V);
 
     fn next(&mut self) -> Option<(&'a K, &'a mut V)> {
-        let handle = match self.handle.take() {
-            Some(handle) => handle,
-            None => return None
-        };
+        if self.length == 0 {
+            return None;
+        } else {
+            self.length -= 1;
+        }
+
+        let handle = unsafe { ptr::read(&self.front) };
 
         let mut cur_handle = match handle.right_kv() {
             Ok(kv) => {
                 let (k, v) = unsafe { ptr::read(&kv).into_kv_mut() };
-                self.handle = Some(kv.right_edge());
+                self.front = kv.right_edge();
                 return Some((k, v));
             },
-            Err(last_edge) => match last_edge.into_node().ascend() {
-                Ok(handle) => handle,
-                Err(_) => return None
+            Err(last_edge) => {
+                let next_level = last_edge.into_node().ascend().ok();
+                unsafe { unwrap_unchecked(next_level) }
             }
         };
 
         loop {
             match cur_handle.right_kv() {
                 Ok(kv) => {
-                    let (k, v) = unsafe { ptr::read(&kv).into_kv_mut () };
-                    self.handle = Some(first_leaf_edge(kv.right_edge().descend()));
+                    let (k, v) = unsafe { ptr::read(&kv).into_kv_mut() };
+                    self.front = first_leaf_edge(kv.right_edge().descend());
                     return Some((k, v));
                 },
-                Err(last_edge) => match last_edge.into_node().ascend() {
-                    Ok(new_handle) => cur_handle = new_handle,
-                    Err(_) => return None
+                Err(last_edge) => {
+                    let next_level = last_edge.into_node().ascend().ok();
+                    cur_handle = unsafe { unwrap_unchecked(next_level) };
                 }
             }
         }
     }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.length, Some(self.length))
+    }
+}
+
+impl<'a, K: 'a, V: 'a> DoubleEndedIterator for IterMut<'a, K, V> {
+    fn next_back(&mut self) -> Option<(&'a K, &'a mut V)> {
+        if self.length == 0 {
+            return None;
+        } else {
+            self.length -= 1;
+        }
+
+        let handle = unsafe { ptr::read(&self.back) };
+
+        let mut cur_handle = match handle.left_kv() {
+            Ok(kv) => {
+                let (k, v) = unsafe { ptr::read(&kv).into_kv_mut() };
+                self.back = kv.left_edge();
+                return Some((k, v));
+            },
+            Err(last_edge) => {
+                let next_level = last_edge.into_node().ascend().ok();
+                unsafe { unwrap_unchecked(next_level) }
+            }
+        };
+
+        loop {
+            match cur_handle.left_kv() {
+                Ok(kv) => {
+                    let (k, v) = unsafe { ptr::read(&kv).into_kv_mut() };
+                    self.back = last_leaf_edge(kv.left_edge().descend());
+                    return Some((k, v));
+                },
+                Err(last_edge) => {
+                    let next_level = last_edge.into_node().ascend().ok();
+                    cur_handle = unsafe { unwrap_unchecked(next_level) };
+                }
+            }
+        }
+    }
+}
+
+impl<'a, K: 'a, V: 'a> ExactSizeIterator for IterMut<'a, K, V> {
+    fn len(&self) -> usize { self.length }
 }
 
 impl<K, V> IntoIterator for BTreeMap<K, V> {
@@ -453,18 +506,31 @@ impl<K, V> IntoIterator for BTreeMap<K, V> {
     type IntoIter = IntoIter<K, V>;
 
     fn into_iter(self) -> IntoIter<K, V> {
-        let root = unsafe { ptr::read(&self.root) };
+        let root1 = unsafe { ptr::read(&self.root).into_ref() };
+        let root2 = unsafe { ptr::read(&self.root).into_ref() };
+        let len = self.length;
         mem::forget(self);
     
         IntoIter {
-            handle: Some(first_leaf_edge(root.into_ref()))
+            front: first_leaf_edge(root1),
+            back: last_leaf_edge(root2),
+            length: len
         }
     }
 }
 
 impl<K, V> Drop for IntoIter<K, V> {
     fn drop(&mut self) {
-        for _ in self { }
+        for _ in &mut *self { }
+        unsafe {
+            let leaf_node = ptr::read(&self.front).into_node();
+            if let Some(first_parent) = leaf_node.deallocate_and_ascend() {
+                let mut cur_node = first_parent.into_node();
+                while let Some(parent) = cur_node.deallocate_and_ascend() {
+                    cur_node = parent.into_node()
+                }
+            }
+        }
     }
 }
 
@@ -472,22 +538,22 @@ impl<K, V> Iterator for IntoIter<K, V> {
     type Item = (K, V);
 
     fn next(&mut self) -> Option<(K, V)> {
-        let handle = match self.handle.take() {
-            Some(handle) => handle,
-            None => return None
-        };
+        if self.length == 0 {
+            return None;
+        } else {
+            self.length -= 1;
+        }
+
+        let handle = unsafe { ptr::read(&self.front) };
 
         let mut cur_handle = match handle.right_kv() {
             Ok(kv) => {
                 let k = unsafe { ptr::read(kv.reborrow().into_kv().0) };
                 let v = unsafe { ptr::read(kv.reborrow().into_kv().1) };
-                self.handle = Some(kv.right_edge());
+                self.front = kv.right_edge();
                 return Some((k, v));
             },
-            Err(last_edge) => match unsafe { last_edge.into_node().deallocate_and_ascend() } {
-                Some(handle) => handle,
-                None => return None
-            }
+            Err(last_edge) => unsafe { unwrap_unchecked(last_edge.into_node().deallocate_and_ascend()) }
         };
 
         loop {
@@ -495,16 +561,59 @@ impl<K, V> Iterator for IntoIter<K, V> {
                 Ok(kv) => {
                     let k = unsafe { ptr::read(kv.reborrow().into_kv().0) };
                     let v = unsafe { ptr::read(kv.reborrow().into_kv().1) };
-                    self.handle = Some(first_leaf_edge(kv.right_edge().descend()));
+                    self.front = first_leaf_edge(kv.right_edge().descend());
                     return Some((k, v));
                 },
-                Err(last_edge) => match unsafe { last_edge.into_node().deallocate_and_ascend() } {
-                    Some(new_handle) => cur_handle = new_handle,
-                    None => return None
+                Err(last_edge) => unsafe {
+                    cur_handle = unwrap_unchecked(last_edge.into_node().deallocate_and_ascend());
                 }
             }
         }
     }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.length, Some(self.length))
+    }
+}
+
+impl<K, V> DoubleEndedIterator for IntoIter<K, V> {
+    fn next_back(&mut self) -> Option<(K, V)> {
+        if self.length == 0 {
+            return None;
+        } else {
+            self.length -= 1;
+        }
+
+        let handle = unsafe { ptr::read(&self.back) };
+
+        let mut cur_handle = match handle.left_kv() {
+            Ok(kv) => {
+                let k = unsafe { ptr::read(kv.reborrow().into_kv().0) };
+                let v = unsafe { ptr::read(kv.reborrow().into_kv().1) };
+                self.back = kv.left_edge();
+                return Some((k, v));
+            },
+            Err(last_edge) => unsafe { unwrap_unchecked(last_edge.into_node().deallocate_and_ascend()) }
+        };
+
+        loop {
+            match cur_handle.left_kv() {
+                Ok(kv) => {
+                    let k = unsafe { ptr::read(kv.reborrow().into_kv().0) };
+                    let v = unsafe { ptr::read(kv.reborrow().into_kv().1) };
+                    self.back = last_leaf_edge(kv.left_edge().descend());
+                    return Some((k, v));
+                },
+                Err(last_edge) => unsafe {
+                    cur_handle = unwrap_unchecked(last_edge.into_node().deallocate_and_ascend());
+                }
+            }
+        }
+    }
+}
+
+impl<K, V> ExactSizeIterator for IntoIter<K, V> {
+    fn len(&self) -> usize { self.length }
 }
 
 impl<K: Ord, V> FromIterator<(K, V)> for BTreeMap<K, V> {
@@ -665,8 +774,12 @@ impl<K, V> BTreeMap<K, V> {
     /// }
     /// ```
     pub fn iter_mut(&mut self) -> IterMut<K, V> {
+        let root1 = self.root.as_mut();
+        let root2 = unsafe { ptr::read(&root1) };
         IterMut {
-            handle: Some(first_leaf_edge(self.root.as_mut()))
+            front: first_leaf_edge(root1),
+            back: last_leaf_edge(root2),
+            length: self.length
         }
     }
 
