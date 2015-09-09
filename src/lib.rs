@@ -1,4 +1,4 @@
-#![feature(core, collections, nonzero, box_raw, iter_order)]
+#![feature(core, collections, nonzero, box_raw, iter_order, collections_bound)]
 #![feature(alloc, heap_api, core_intrinsics)]
 
 // This is an attempt at an implementation following the ideal

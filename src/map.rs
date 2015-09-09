@@ -2,6 +2,7 @@
 use std::io::{stderr, Write};
 
 use collections::borrow::Borrow;
+use collections::Bound::{self, Included, Excluded, Unbounded};
 use core::cmp::Ordering;
 use core::fmt::Debug;
 use core::hash::{Hash, Hasher};
@@ -287,6 +288,148 @@ impl<K: Ord, V> BTreeMap<K, V> {
                 }.remove())
             },
             GoDown(_) => None
+        }
+    }
+
+    /// Constructs a double-ended iterator over a sub-range of elements in the map, starting
+    /// at min, and ending at max. If min is `Unbounded`, then it will be treated as "negative
+    /// infinity", and if max is `Unbounded`, then it will be treated as "positive infinity".
+    /// Thus range(Unbounded, Unbounded) will yield the whole collection.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(btree_range, collections_bound)]
+    ///
+    /// use std::collections::BTreeMap;
+    /// use std::collections::Bound::{Included, Unbounded};
+    ///
+    /// let mut map = BTreeMap::new();
+    /// map.insert(3, "a");
+    /// map.insert(5, "b");
+    /// map.insert(8, "c");
+    /// for (&key, &value) in map.range(Included(&4), Included(&8)) {
+    ///     println!("{}: {}", key, value);
+    /// }
+    /// assert_eq!(Some((&5, &"b")), map.range(Included(&4), Unbounded).next());
+    /// ```
+    pub fn range<Min: ?Sized + Ord = K, Max: ?Sized + Ord = K>(&self, min: Bound<&Min>,
+                                                               max: Bound<&Max>)
+        -> Range<K, V> where
+        K: Borrow<Min> + Borrow<Max>,
+    {
+        let front = match min {
+            Included(key) => match search::search_tree(self.root.as_ref(), key) {
+                Found(kv_handle) => match kv_handle.left_edge().force() {
+                    Leaf(bottom) => bottom,
+                    Internal(internal) => last_leaf_edge(internal.descend())
+                },
+                GoDown(bottom) => bottom
+            },
+            Excluded(key) => match search::search_tree(self.root.as_ref(), key) {
+                Found(kv_handle) => match kv_handle.right_edge().force() {
+                    Leaf(bottom) => bottom,
+                    Internal(internal) => first_leaf_edge(internal.descend())
+                },
+                GoDown(bottom) => bottom
+            },
+            Unbounded => first_leaf_edge(self.root.as_ref())
+        };
+
+        let back = match max {
+            Included(key) => match search::search_tree(self.root.as_ref(), key) {
+                Found(kv_handle) => match kv_handle.right_edge().force() {
+                    Leaf(bottom) => bottom,
+                    Internal(internal) => first_leaf_edge(internal.descend())
+                },
+                GoDown(bottom) => bottom
+            },
+            Excluded(key) => match search::search_tree(self.root.as_ref(), key) {
+                Found(kv_handle) => match kv_handle.left_edge().force() {
+                    Leaf(bottom) => bottom,
+                    Internal(internal) => last_leaf_edge(internal.descend())
+                },
+                GoDown(bottom) => bottom
+            },
+            Unbounded => last_leaf_edge(self.root.as_ref())
+        };
+
+        Range {
+            front: front,
+            back: back
+        }
+    }
+
+    /// Constructs a mutable double-ended iterator over a sub-range of elements in the map, starting
+    /// at min, and ending at max. If min is `Unbounded`, then it will be treated as "negative
+    /// infinity", and if max is `Unbounded`, then it will be treated as "positive infinity".
+    /// Thus range(Unbounded, Unbounded) will yield the whole collection.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(btree_range, collections_bound)]
+    ///
+    /// use std::collections::BTreeMap;
+    /// use std::collections::Bound::{Included, Excluded};
+    ///
+    /// let mut map: BTreeMap<&str, i32> = ["Alice", "Bob", "Carol", "Cheryl"].iter()
+    ///                                                                       .map(|&s| (s, 0))
+    ///                                                                       .collect();
+    /// for (_, balance) in map.range_mut(Included("B"), Excluded("Cheryl")) {
+    ///     *balance += 100;
+    /// }
+    /// for (name, balance) in &map {
+    ///     println!("{} => {}", name, balance);
+    /// }
+    /// ```
+    pub fn range_mut<Min: ?Sized + Ord = K, Max: ?Sized + Ord = K>(&mut self, min: Bound<&Min>,
+                                                                   max: Bound<&Max>)
+        -> RangeMut<K, V> where
+        K: Borrow<Min> + Borrow<Max>,
+    {
+        let root1 = self.root.as_mut();
+        let root2 = unsafe { ptr::read(&root1) };
+
+        let front = match min {
+            Included(key) => match search::search_tree(root1, key) {
+                Found(kv_handle) => match kv_handle.left_edge().force() {
+                    Leaf(bottom) => bottom,
+                    Internal(internal) => last_leaf_edge(internal.descend())
+                },
+                GoDown(bottom) => bottom
+            },
+            Excluded(key) => match search::search_tree(root1, key) {
+                Found(kv_handle) => match kv_handle.right_edge().force() {
+                    Leaf(bottom) => bottom,
+                    Internal(internal) => first_leaf_edge(internal.descend())
+                },
+                GoDown(bottom) => bottom
+            },
+            Unbounded => first_leaf_edge(root1)
+        };
+
+        let back = match max {
+            Included(key) => match search::search_tree(root2, key) {
+                Found(kv_handle) => match kv_handle.right_edge().force() {
+                    Leaf(bottom) => bottom,
+                    Internal(internal) => first_leaf_edge(internal.descend())
+                },
+                GoDown(bottom) => bottom
+            },
+            Excluded(key) => match search::search_tree(root2, key) {
+                Found(kv_handle) => match kv_handle.left_edge().force() {
+                    Leaf(bottom) => bottom,
+                    Internal(internal) => last_leaf_edge(internal.descend())
+                },
+                GoDown(bottom) => bottom
+            },
+            Unbounded => last_leaf_edge(root2)
+        };
+
+        RangeMut {
+            front: front,
+            back: back
         }
     }
 

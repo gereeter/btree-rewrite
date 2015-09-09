@@ -1,7 +1,12 @@
+#![feature(collections, collections_bound, range_inclusive)]
+
 extern crate btree_rewrite;
+extern crate collections;
 extern crate rand;
 
+use collections::Bound::{self, Included, Excluded, Unbounded};
 use btree_rewrite::map::*;
+use std::iter::range_inclusive;
 use std::rc::Rc;
 
 #[test]
@@ -172,8 +177,6 @@ fn test_iter_mixed() {
     test(size, map.into_iter());
 }
 
-
-/*
 #[test]
 fn test_range_small() {
     let size = 5;
@@ -231,7 +234,6 @@ fn test_range() {
         }
     }
 }
-*/
 
 #[test]
 fn test_borrow() {
