@@ -62,15 +62,13 @@ impl<K, V> Drop for BTreeMap<K, V> {
 
 /// An iterator over a BTreeMap's entries.
 pub struct Iter<'a, K: 'a, V: 'a> {
-    front: Handle<NodeRef<marker::Borrowed<'a>, K, V, marker::Immut, marker::Leaf>, marker::Edge>,
-    back: Handle<NodeRef<marker::Borrowed<'a>, K, V, marker::Immut, marker::Leaf>, marker::Edge>,
+    range: Range<'a, K, V>,
     length: usize
 }
 
 /// A mutable iterator over a BTreeMap's entries.
 pub struct IterMut<'a, K: 'a, V: 'a> {
-    front: Handle<NodeRef<marker::Borrowed<'a>, K, V, marker::Mut, marker::Leaf>, marker::Edge>,
-    back: Handle<NodeRef<marker::Borrowed<'a>, K, V, marker::Mut, marker::Leaf>, marker::Edge>,
+    range: RangeMut<'a, K, V>,
     length: usize
 }
 
@@ -79,6 +77,18 @@ pub struct IntoIter<K, V> {
     front: Handle<NodeRef<marker::Owned, K, V, marker::Mut, marker::Leaf>, marker::Edge>,
     back: Handle<NodeRef<marker::Owned, K, V, marker::Mut, marker::Leaf>, marker::Edge>,
     length: usize
+}
+
+/// An iterator over a sub-range of BTreeMap's entries.
+pub struct Range<'a, K: 'a, V: 'a> {
+    front: Handle<NodeRef<marker::Borrowed<'a>, K, V, marker::Immut, marker::Leaf>, marker::Edge>,
+    back: Handle<NodeRef<marker::Borrowed<'a>, K, V, marker::Immut, marker::Leaf>, marker::Edge>
+}
+
+/// A mutable iterator over a sub-range of BTreeMap's entries.
+pub struct RangeMut<'a, K: 'a, V: 'a> {
+    front: Handle<NodeRef<marker::Borrowed<'a>, K, V, marker::Mut, marker::Leaf>, marker::Edge>,
+    back: Handle<NodeRef<marker::Borrowed<'a>, K, V, marker::Mut, marker::Leaf>, marker::Edge>
 }
 
 /// A view into a single entry in a map, which may either be vacant or occupied.
@@ -330,12 +340,12 @@ impl<'a, K: 'a, V: 'a> Iterator for Iter<'a, K, V> {
             self.length -= 1;
         }
 
-        let handle = self.front;
+        let handle = self.range.front;
 
         let mut cur_handle = match handle.right_kv() {
             Ok(kv) => {
                 let ret = kv.into_kv();
-                self.front = kv.right_edge();
+                self.range.front = kv.right_edge();
                 return Some(ret);
             },
             Err(last_edge) => {
@@ -348,7 +358,7 @@ impl<'a, K: 'a, V: 'a> Iterator for Iter<'a, K, V> {
             match cur_handle.right_kv() {
                 Ok(kv) => {
                     let ret = kv.into_kv();
-                    self.front = first_leaf_edge(kv.right_edge().descend());
+                    self.range.front = first_leaf_edge(kv.right_edge().descend());
                     return Some(ret);
                 },
                 Err(last_edge) => {
@@ -372,12 +382,12 @@ impl<'a, K: 'a, V: 'a> DoubleEndedIterator for Iter<'a, K, V> {
             self.length -= 1;
         }
 
-        let handle = self.back;
+        let handle = self.range.back;
 
         let mut cur_handle = match handle.left_kv() {
             Ok(kv) => {
                 let ret = kv.into_kv();
-                self.back = kv.left_edge();
+                self.range.back = kv.left_edge();
                 return Some(ret);
             },
             Err(last_edge) => {
@@ -390,7 +400,7 @@ impl<'a, K: 'a, V: 'a> DoubleEndedIterator for Iter<'a, K, V> {
             match cur_handle.left_kv() {
                 Ok(kv) => {
                     let ret = kv.into_kv();
-                    self.back = last_leaf_edge(kv.left_edge().descend());
+                    self.range.back = last_leaf_edge(kv.left_edge().descend());
                     return Some(ret);
                 },
                 Err(last_edge) => {
@@ -425,12 +435,12 @@ impl<'a, K: 'a, V: 'a> Iterator for IterMut<'a, K, V> {
             self.length -= 1;
         }
 
-        let handle = unsafe { ptr::read(&self.front) };
+        let handle = unsafe { ptr::read(&self.range.front) };
 
         let mut cur_handle = match handle.right_kv() {
             Ok(kv) => {
                 let (k, v) = unsafe { ptr::read(&kv).into_kv_mut() };
-                self.front = kv.right_edge();
+                self.range.front = kv.right_edge();
                 return Some((k, v));
             },
             Err(last_edge) => {
@@ -443,7 +453,7 @@ impl<'a, K: 'a, V: 'a> Iterator for IterMut<'a, K, V> {
             match cur_handle.right_kv() {
                 Ok(kv) => {
                     let (k, v) = unsafe { ptr::read(&kv).into_kv_mut() };
-                    self.front = first_leaf_edge(kv.right_edge().descend());
+                    self.range.front = first_leaf_edge(kv.right_edge().descend());
                     return Some((k, v));
                 },
                 Err(last_edge) => {
@@ -467,12 +477,12 @@ impl<'a, K: 'a, V: 'a> DoubleEndedIterator for IterMut<'a, K, V> {
             self.length -= 1;
         }
 
-        let handle = unsafe { ptr::read(&self.back) };
+        let handle = unsafe { ptr::read(&self.range.back) };
 
         let mut cur_handle = match handle.left_kv() {
             Ok(kv) => {
                 let (k, v) = unsafe { ptr::read(&kv).into_kv_mut() };
-                self.back = kv.left_edge();
+                self.range.back = kv.left_edge();
                 return Some((k, v));
             },
             Err(last_edge) => {
@@ -485,7 +495,7 @@ impl<'a, K: 'a, V: 'a> DoubleEndedIterator for IterMut<'a, K, V> {
             match cur_handle.left_kv() {
                 Ok(kv) => {
                     let (k, v) = unsafe { ptr::read(&kv).into_kv_mut() };
-                    self.back = last_leaf_edge(kv.left_edge().descend());
+                    self.range.back = last_leaf_edge(kv.left_edge().descend());
                     return Some((k, v));
                 },
                 Err(last_edge) => {
@@ -614,6 +624,154 @@ impl<K, V> DoubleEndedIterator for IntoIter<K, V> {
 
 impl<K, V> ExactSizeIterator for IntoIter<K, V> {
     fn len(&self) -> usize { self.length }
+}
+
+impl<'a, K: 'a, V: 'a> Iterator for Range<'a, K, V> {
+    type Item = (&'a K, &'a V);
+
+    fn next(&mut self) -> Option<(&'a K, &'a V)> {
+        if self.front == self.back {
+            return None;
+        }
+
+        let handle = self.front;
+
+        let mut cur_handle = match handle.right_kv() {
+            Ok(kv) => {
+                let ret = kv.into_kv();
+                self.front = kv.right_edge();
+                return Some(ret);
+            },
+            Err(last_edge) => {
+                let next_level = last_edge.into_node().ascend().ok();
+                unsafe { unwrap_unchecked(next_level) }
+            }
+        };
+
+        loop {
+            match cur_handle.right_kv() {
+                Ok(kv) => {
+                    let ret = kv.into_kv();
+                    self.front = first_leaf_edge(kv.right_edge().descend());
+                    return Some(ret);
+                },
+                Err(last_edge) => {
+                    let next_level = last_edge.into_node().ascend().ok();
+                    cur_handle = unsafe { unwrap_unchecked(next_level) };
+                }
+            }
+        }
+    }
+}
+
+impl<'a, K: 'a, V: 'a> DoubleEndedIterator for Range<'a, K, V> {
+    fn next_back(&mut self) -> Option<(&'a K, &'a V)> {
+        if self.front == self.back {
+            return None;
+        }
+
+        let handle = self.back;
+
+        let mut cur_handle = match handle.left_kv() {
+            Ok(kv) => {
+                let ret = kv.into_kv();
+                self.back = kv.left_edge();
+                return Some(ret);
+            },
+            Err(last_edge) => {
+                let next_level = last_edge.into_node().ascend().ok();
+                unsafe { unwrap_unchecked(next_level) }
+            }
+        };
+
+        loop {
+            match cur_handle.left_kv() {
+                Ok(kv) => {
+                    let ret = kv.into_kv();
+                    self.back = last_leaf_edge(kv.left_edge().descend());
+                    return Some(ret);
+                },
+                Err(last_edge) => {
+                    let next_level = last_edge.into_node().ascend().ok();
+                    cur_handle = unsafe { unwrap_unchecked(next_level) };
+                }
+            }
+        }
+    }
+}
+
+impl<'a, K: 'a, V: 'a> Iterator for RangeMut<'a, K, V> {
+    type Item = (&'a K, &'a mut V);
+
+    fn next(&mut self) -> Option<(&'a K, &'a mut V)> {
+        if self.front == self.back {
+            return None;
+        }
+
+        let handle = unsafe { ptr::read(&self.front) };
+
+        let mut cur_handle = match handle.right_kv() {
+            Ok(kv) => {
+                let (k, v) = unsafe { ptr::read(&kv).into_kv_mut() };
+                self.front = kv.right_edge();
+                return Some((k, v));
+            },
+            Err(last_edge) => {
+                let next_level = last_edge.into_node().ascend().ok();
+                unsafe { unwrap_unchecked(next_level) }
+            }
+        };
+
+        loop {
+            match cur_handle.right_kv() {
+                Ok(kv) => {
+                    let (k, v) = unsafe { ptr::read(&kv).into_kv_mut() };
+                    self.front = first_leaf_edge(kv.right_edge().descend());
+                    return Some((k, v));
+                },
+                Err(last_edge) => {
+                    let next_level = last_edge.into_node().ascend().ok();
+                    cur_handle = unsafe { unwrap_unchecked(next_level) };
+                }
+            }
+        }
+    }
+}
+
+impl<'a, K: 'a, V: 'a> DoubleEndedIterator for RangeMut<'a, K, V> {
+    fn next_back(&mut self) -> Option<(&'a K, &'a mut V)> {
+        if self.front == self.back {
+            return None;
+        }
+
+        let handle = unsafe { ptr::read(&self.back) };
+
+        let mut cur_handle = match handle.left_kv() {
+            Ok(kv) => {
+                let (k, v) = unsafe { ptr::read(&kv).into_kv_mut() };
+                self.back = kv.left_edge();
+                return Some((k, v));
+            },
+            Err(last_edge) => {
+                let next_level = last_edge.into_node().ascend().ok();
+                unsafe { unwrap_unchecked(next_level) }
+            }
+        };
+
+        loop {
+            match cur_handle.left_kv() {
+                Ok(kv) => {
+                    let (k, v) = unsafe { ptr::read(&kv).into_kv_mut() };
+                    self.back = last_leaf_edge(kv.left_edge().descend());
+                    return Some((k, v));
+                },
+                Err(last_edge) => {
+                    let next_level = last_edge.into_node().ascend().ok();
+                    cur_handle = unsafe { unwrap_unchecked(next_level) };
+                }
+            }
+        }
+    }
 }
 
 impl<K: Ord, V> FromIterator<(K, V)> for BTreeMap<K, V> {
@@ -748,8 +906,10 @@ impl<K, V> BTreeMap<K, V> {
     /// ```
     pub fn iter(&self) -> Iter<K, V> {
         Iter {
-            front: first_leaf_edge(self.root.as_ref()),
-            back: last_leaf_edge(self.root.as_ref()),
+            range: Range {
+                front: first_leaf_edge(self.root.as_ref()),
+                back: last_leaf_edge(self.root.as_ref())
+            },
             length: self.length
         }
     }
@@ -777,8 +937,10 @@ impl<K, V> BTreeMap<K, V> {
         let root1 = self.root.as_mut();
         let root2 = unsafe { ptr::read(&root1) };
         IterMut {
-            front: first_leaf_edge(root1),
-            back: last_leaf_edge(root2),
+            range: RangeMut {
+                front: first_leaf_edge(root1),
+                back: last_leaf_edge(root2),
+            },
             length: self.length
         }
     }

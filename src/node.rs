@@ -449,6 +449,12 @@ impl<Node> Handle<Node, marker::KV> {
     }
 }
 
+impl<Lifetime, K, V, Mutability, NodeType, HandleType> PartialEq for Handle<NodeRef<Lifetime, K, V, Mutability, NodeType>, HandleType> {
+    fn eq(&self, other: &Self) -> bool {
+        self.node.node.ptr == other.node.node.ptr && self.idx == other.idx
+    }
+}
+
 impl<Lifetime, K, V, Mutability, NodeType, HandleType> Handle<NodeRef<Lifetime, K, V, Mutability, NodeType>, HandleType> {
     pub fn reborrow(&self) -> Handle<NodeRef<marker::Borrowed, K, V, marker::Immut, NodeType>, HandleType> {
         unsafe { Handle::new(self.node.reborrow(), self.idx) }
