@@ -1,8 +1,23 @@
 extern crate btree_rewrite;
 extern crate rand;
 
-use btree_rewrite::map::{BTreeMap, Occupied, Vacant};
+use btree_rewrite::map::*;
 use std::rc::Rc;
+
+#[test]
+fn test_send_sync() {
+    fn t<T: Send + Sync>() {}
+
+    t::<BTreeMap<u32, i32>>();
+
+    t::<IntoIter<u32, i32>>();
+    t::<Iter<u32, i32>>();
+    t::<IterMut<u32, i32>>();
+
+    t::<Entry<u32, i32>>();
+    t::<OccupiedEntry<u32, i32>>();
+    t::<VacantEntry<u32, i32>>();
+}
 
 #[test]
 pub fn test_rand_large() {

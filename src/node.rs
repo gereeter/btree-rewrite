@@ -96,6 +96,9 @@ pub struct Root<K, V> {
     height: usize
 }
 
+unsafe impl<K: Sync, V: Sync> Sync for Root<K, V> { }
+unsafe impl<K: Send, V: Send> Send for Root<K, V> { }
+
 impl<K, V> Root<K, V> {
     pub fn new_leaf() -> Self {
         Root {
@@ -180,6 +183,12 @@ impl<'a, K: 'a, V: 'a, Type> Clone for NodeRef<marker::Borrowed<'a>, K, V, marke
         *self
     }
 }
+
+unsafe impl<Lifetime, K: Sync, V: Sync, Mutability, Type> Sync for NodeRef<Lifetime, K, V, Mutability, Type> { }
+
+unsafe impl<'a, K: Sync + 'a, V: Sync + 'a, Type> Send for NodeRef<marker::Borrowed<'a>, K, V, marker::Immut, Type> { }
+unsafe impl<'a, K: Send + 'a, V: Send + 'a, Type> Send for NodeRef<marker::Borrowed<'a>, K, V, marker::Mut, Type> { }
+unsafe impl<K: Send, V: Send, Mutability, Type> Send for NodeRef<marker::Owned, K, V, Mutability, Type> { }
 
 impl<Lifetime, K, V, Mutability> NodeRef<Lifetime, K, V, Mutability, marker::Internal> {
     fn as_internal(&self) -> &InternalNode<K, V> {
