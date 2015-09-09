@@ -19,6 +19,9 @@ fn test_send_sync() {
     t::<Iter<u32, i32>>();
     t::<IterMut<u32, i32>>();
 
+    t::<Range<u32, i32>>();
+    t::<RangeMut<u32, i32>>();
+
     t::<Entry<u32, i32>>();
     t::<OccupiedEntry<u32, i32>>();
     t::<VacantEntry<u32, i32>>();
