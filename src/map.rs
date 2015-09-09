@@ -559,6 +559,12 @@ impl<'a, K: 'a, V: 'a> ExactSizeIterator for Iter<'a, K, V> {
     fn len(&self) -> usize { self.length }
 }
 
+impl<'a, K: 'a, V: 'a> Clone for Iter<'a, K, V> {
+    fn clone(&self) -> Self {
+        Iter { range: self.range.clone(), ..*self }
+    }
+}
+
 impl<'a, K: 'a, V: 'a> IntoIterator for &'a mut BTreeMap<K, V> {
     type Item = (&'a K, &'a mut V);
     type IntoIter = IterMut<'a, K, V>;
@@ -840,6 +846,12 @@ impl<'a, K: 'a, V: 'a> DoubleEndedIterator for Range<'a, K, V> {
                 }
             }
         }
+    }
+}
+
+impl<'a, K: 'a, V: 'a> Clone for Range<'a, K, V> {
+    fn clone(&self) -> Self {
+        Range { ..*self }
     }
 }
 
