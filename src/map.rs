@@ -478,37 +478,10 @@ impl<'a, K: 'a, V: 'a> Iterator for Iter<'a, K, V> {
 
     fn next(&mut self) -> Option<(&'a K, &'a V)> {
         if self.length == 0 {
-            return None;
+            None
         } else {
             self.length -= 1;
-        }
-
-        let handle = self.range.front;
-
-        let mut cur_handle = match handle.right_kv() {
-            Ok(kv) => {
-                let ret = kv.into_kv();
-                self.range.front = kv.right_edge();
-                return Some(ret);
-            },
-            Err(last_edge) => {
-                let next_level = last_edge.into_node().ascend().ok();
-                unsafe { unwrap_unchecked(next_level) }
-            }
-        };
-
-        loop {
-            match cur_handle.right_kv() {
-                Ok(kv) => {
-                    let ret = kv.into_kv();
-                    self.range.front = first_leaf_edge(kv.right_edge().descend());
-                    return Some(ret);
-                },
-                Err(last_edge) => {
-                    let next_level = last_edge.into_node().ascend().ok();
-                    cur_handle = unsafe { unwrap_unchecked(next_level) };
-                }
-            }
+            self.range.next_unchecked()
         }
     }
 
@@ -520,37 +493,10 @@ impl<'a, K: 'a, V: 'a> Iterator for Iter<'a, K, V> {
 impl<'a, K: 'a, V: 'a> DoubleEndedIterator for Iter<'a, K, V> {
     fn next_back(&mut self) -> Option<(&'a K, &'a V)> {
         if self.length == 0 {
-            return None;
+            None
         } else {
             self.length -= 1;
-        }
-
-        let handle = self.range.back;
-
-        let mut cur_handle = match handle.left_kv() {
-            Ok(kv) => {
-                let ret = kv.into_kv();
-                self.range.back = kv.left_edge();
-                return Some(ret);
-            },
-            Err(last_edge) => {
-                let next_level = last_edge.into_node().ascend().ok();
-                unsafe { unwrap_unchecked(next_level) }
-            }
-        };
-
-        loop {
-            match cur_handle.left_kv() {
-                Ok(kv) => {
-                    let ret = kv.into_kv();
-                    self.range.back = last_leaf_edge(kv.left_edge().descend());
-                    return Some(ret);
-                },
-                Err(last_edge) => {
-                    let next_level = last_edge.into_node().ascend().ok();
-                    cur_handle = unsafe { unwrap_unchecked(next_level) };
-                }
-            }
+            self.range.next_back_unchecked()
         }
     }
 }
@@ -579,37 +525,10 @@ impl<'a, K: 'a, V: 'a> Iterator for IterMut<'a, K, V> {
 
     fn next(&mut self) -> Option<(&'a K, &'a mut V)> {
         if self.length == 0 {
-            return None;
+            None
         } else {
             self.length -= 1;
-        }
-
-        let handle = unsafe { ptr::read(&self.range.front) };
-
-        let mut cur_handle = match handle.right_kv() {
-            Ok(kv) => {
-                let (k, v) = unsafe { ptr::read(&kv).into_kv_mut() };
-                self.range.front = kv.right_edge();
-                return Some((k, v));
-            },
-            Err(last_edge) => {
-                let next_level = last_edge.into_node().ascend().ok();
-                unsafe { unwrap_unchecked(next_level) }
-            }
-        };
-
-        loop {
-            match cur_handle.right_kv() {
-                Ok(kv) => {
-                    let (k, v) = unsafe { ptr::read(&kv).into_kv_mut() };
-                    self.range.front = first_leaf_edge(kv.right_edge().descend());
-                    return Some((k, v));
-                },
-                Err(last_edge) => {
-                    let next_level = last_edge.into_node().ascend().ok();
-                    cur_handle = unsafe { unwrap_unchecked(next_level) };
-                }
-            }
+            self.range.next_unchecked()
         }
     }
 
@@ -621,37 +540,10 @@ impl<'a, K: 'a, V: 'a> Iterator for IterMut<'a, K, V> {
 impl<'a, K: 'a, V: 'a> DoubleEndedIterator for IterMut<'a, K, V> {
     fn next_back(&mut self) -> Option<(&'a K, &'a mut V)> {
         if self.length == 0 {
-            return None;
+            None
         } else {
             self.length -= 1;
-        }
-
-        let handle = unsafe { ptr::read(&self.range.back) };
-
-        let mut cur_handle = match handle.left_kv() {
-            Ok(kv) => {
-                let (k, v) = unsafe { ptr::read(&kv).into_kv_mut() };
-                self.range.back = kv.left_edge();
-                return Some((k, v));
-            },
-            Err(last_edge) => {
-                let next_level = last_edge.into_node().ascend().ok();
-                unsafe { unwrap_unchecked(next_level) }
-            }
-        };
-
-        loop {
-            match cur_handle.left_kv() {
-                Ok(kv) => {
-                    let (k, v) = unsafe { ptr::read(&kv).into_kv_mut() };
-                    self.range.back = last_leaf_edge(kv.left_edge().descend());
-                    return Some((k, v));
-                },
-                Err(last_edge) => {
-                    let next_level = last_edge.into_node().ascend().ok();
-                    cur_handle = unsafe { unwrap_unchecked(next_level) };
-                }
-            }
+            self.range.next_back_unchecked()
         }
     }
 }
@@ -780,9 +672,15 @@ impl<'a, K: 'a, V: 'a> Iterator for Range<'a, K, V> {
 
     fn next(&mut self) -> Option<(&'a K, &'a V)> {
         if self.front == self.back {
-            return None;
+            None
+        } else {
+            self.next_unchecked()
         }
+    }
+}
 
+impl<'a, K: 'a, V: 'a> Range<'a, K, V> {
+    fn next_unchecked(&mut self) -> Option<(&'a K, &'a V)> {
         let handle = self.front;
 
         let mut cur_handle = match handle.right_kv() {
@@ -816,9 +714,15 @@ impl<'a, K: 'a, V: 'a> Iterator for Range<'a, K, V> {
 impl<'a, K: 'a, V: 'a> DoubleEndedIterator for Range<'a, K, V> {
     fn next_back(&mut self) -> Option<(&'a K, &'a V)> {
         if self.front == self.back {
-            return None;
+            None
+        } else {
+            self.next_back_unchecked()
         }
+    }
+}
 
+impl<'a, K: 'a, V: 'a> Range<'a, K, V> {
+    fn next_back_unchecked(&mut self) -> Option<(&'a K, &'a V)> {
         let handle = self.back;
 
         let mut cur_handle = match handle.left_kv() {
@@ -860,9 +764,15 @@ impl<'a, K: 'a, V: 'a> Iterator for RangeMut<'a, K, V> {
 
     fn next(&mut self) -> Option<(&'a K, &'a mut V)> {
         if self.front == self.back {
-            return None;
+            None
+        } else {
+            self.next_unchecked()
         }
+    }
+}
 
+impl<'a, K: 'a, V: 'a> RangeMut<'a, K, V> {
+    fn next_unchecked(&mut self) -> Option<(&'a K, &'a mut V)> {
         let handle = unsafe { ptr::read(&self.front) };
 
         let mut cur_handle = match handle.right_kv() {
@@ -896,9 +806,15 @@ impl<'a, K: 'a, V: 'a> Iterator for RangeMut<'a, K, V> {
 impl<'a, K: 'a, V: 'a> DoubleEndedIterator for RangeMut<'a, K, V> {
     fn next_back(&mut self) -> Option<(&'a K, &'a mut V)> {
         if self.front == self.back {
-            return None;
+            None
+        } else {
+            self.next_back_unchecked()
         }
+    }
+}
 
+impl<'a, K: 'a, V: 'a> RangeMut<'a, K, V> {
+    fn next_back_unchecked(&mut self) -> Option<(&'a K, &'a mut V)> {
         let handle = unsafe { ptr::read(&self.back) };
 
         let mut cur_handle = match handle.left_kv() {
