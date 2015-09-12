@@ -481,7 +481,7 @@ impl<'a, K: 'a, V: 'a> Iterator for Iter<'a, K, V> {
             None
         } else {
             self.length -= 1;
-            unsafe { self.range.next_unchecked() }
+            unsafe { Some(self.range.next_unchecked()) }
         }
     }
 
@@ -496,7 +496,7 @@ impl<'a, K: 'a, V: 'a> DoubleEndedIterator for Iter<'a, K, V> {
             None
         } else {
             self.length -= 1;
-            unsafe { self.range.next_back_unchecked() }
+            unsafe { Some(self.range.next_back_unchecked()) }
         }
     }
 }
@@ -528,7 +528,7 @@ impl<'a, K: 'a, V: 'a> Iterator for IterMut<'a, K, V> {
             None
         } else {
             self.length -= 1;
-            unsafe { self.range.next_unchecked() }
+            unsafe { Some(self.range.next_unchecked()) }
         }
     }
 
@@ -543,7 +543,7 @@ impl<'a, K: 'a, V: 'a> DoubleEndedIterator for IterMut<'a, K, V> {
             None
         } else {
             self.length -= 1;
-            unsafe { self.range.next_back_unchecked() }
+            unsafe { Some(self.range.next_back_unchecked()) }
         }
     }
 }
@@ -674,20 +674,20 @@ impl<'a, K: 'a, V: 'a> Iterator for Range<'a, K, V> {
         if self.front == self.back {
             None
         } else {
-            unsafe { self.next_unchecked() }
+            unsafe { Some(self.next_unchecked()) }
         }
     }
 }
 
 impl<'a, K: 'a, V: 'a> Range<'a, K, V> {
-    unsafe fn next_unchecked(&mut self) -> Option<(&'a K, &'a V)> {
+    unsafe fn next_unchecked(&mut self) -> (&'a K, &'a V) {
         let handle = self.front;
 
         let mut cur_handle = match handle.right_kv() {
             Ok(kv) => {
                 let ret = kv.into_kv();
                 self.front = kv.right_edge();
-                return Some(ret);
+                return ret;
             },
             Err(last_edge) => {
                 let next_level = last_edge.into_node().ascend().ok();
@@ -700,7 +700,7 @@ impl<'a, K: 'a, V: 'a> Range<'a, K, V> {
                 Ok(kv) => {
                     let ret = kv.into_kv();
                     self.front = first_leaf_edge(kv.right_edge().descend());
-                    return Some(ret);
+                    return ret;
                 },
                 Err(last_edge) => {
                     let next_level = last_edge.into_node().ascend().ok();
@@ -716,20 +716,20 @@ impl<'a, K: 'a, V: 'a> DoubleEndedIterator for Range<'a, K, V> {
         if self.front == self.back {
             None
         } else {
-            unsafe { self.next_back_unchecked() }
+            unsafe { Some(self.next_back_unchecked()) }
         }
     }
 }
 
 impl<'a, K: 'a, V: 'a> Range<'a, K, V> {
-    unsafe fn next_back_unchecked(&mut self) -> Option<(&'a K, &'a V)> {
+    unsafe fn next_back_unchecked(&mut self) -> (&'a K, &'a V) {
         let handle = self.back;
 
         let mut cur_handle = match handle.left_kv() {
             Ok(kv) => {
                 let ret = kv.into_kv();
                 self.back = kv.left_edge();
-                return Some(ret);
+                return ret;
             },
             Err(last_edge) => {
                 let next_level = last_edge.into_node().ascend().ok();
@@ -742,7 +742,7 @@ impl<'a, K: 'a, V: 'a> Range<'a, K, V> {
                 Ok(kv) => {
                     let ret = kv.into_kv();
                     self.back = last_leaf_edge(kv.left_edge().descend());
-                    return Some(ret);
+                    return ret;
                 },
                 Err(last_edge) => {
                     let next_level = last_edge.into_node().ascend().ok();
@@ -766,20 +766,20 @@ impl<'a, K: 'a, V: 'a> Iterator for RangeMut<'a, K, V> {
         if self.front == self.back {
             None
         } else {
-            unsafe { self.next_unchecked() }
+            unsafe { Some (self.next_unchecked()) }
         }
     }
 }
 
 impl<'a, K: 'a, V: 'a> RangeMut<'a, K, V> {
-    unsafe fn next_unchecked(&mut self) -> Option<(&'a K, &'a mut V)> {
+    unsafe fn next_unchecked(&mut self) -> (&'a K, &'a mut V) {
         let handle = ptr::read(&self.front);
 
         let mut cur_handle = match handle.right_kv() {
             Ok(kv) => {
                 let (k, v) = ptr::read(&kv).into_kv_mut();
                 self.front = kv.right_edge();
-                return Some((k, v));
+                return (k, v);
             },
             Err(last_edge) => {
                 let next_level = last_edge.into_node().ascend().ok();
@@ -792,7 +792,7 @@ impl<'a, K: 'a, V: 'a> RangeMut<'a, K, V> {
                 Ok(kv) => {
                     let (k, v) = ptr::read(&kv).into_kv_mut();
                     self.front = first_leaf_edge(kv.right_edge().descend());
-                    return Some((k, v));
+                    return (k, v);
                 },
                 Err(last_edge) => {
                     let next_level = last_edge.into_node().ascend().ok();
@@ -808,20 +808,20 @@ impl<'a, K: 'a, V: 'a> DoubleEndedIterator for RangeMut<'a, K, V> {
         if self.front == self.back {
             None
         } else {
-            unsafe { self.next_back_unchecked() }
+            unsafe { Some(self.next_back_unchecked()) }
         }
     }
 }
 
 impl<'a, K: 'a, V: 'a> RangeMut<'a, K, V> {
-    unsafe fn next_back_unchecked(&mut self) -> Option<(&'a K, &'a mut V)> {
+    unsafe fn next_back_unchecked(&mut self) -> (&'a K, &'a mut V) {
         let handle = ptr::read(&self.back);
 
         let mut cur_handle = match handle.left_kv() {
             Ok(kv) => {
                 let (k, v) = ptr::read(&kv).into_kv_mut();
                 self.back = kv.left_edge();
-                return Some((k, v));
+                return (k, v);
             },
             Err(last_edge) => {
                 let next_level = last_edge.into_node().ascend().ok();
@@ -834,7 +834,7 @@ impl<'a, K: 'a, V: 'a> RangeMut<'a, K, V> {
                 Ok(kv) => {
                     let (k, v) = ptr::read(&kv).into_kv_mut();
                     self.back = last_leaf_edge(kv.left_edge().descend());
-                    return Some((k, v));
+                    return (k, v);
                 },
                 Err(last_edge) => {
                     let next_level = last_edge.into_node().ascend().ok();
