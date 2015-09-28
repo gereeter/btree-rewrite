@@ -91,6 +91,7 @@ impl<K, V> BoxedNode<K, V> {
     }
 }
 
+/// An owned tree. Note that despite being owned, this does not have a destructor, and must be cleaned up manually.
 pub struct Root<K, V> {
     node: BoxedNode<K, V>,
     height: usize
@@ -134,6 +135,8 @@ impl<K, V> Root<K, V> {
         }
     }
 
+    /// Add a new internal node with a single edge, pointing to the previous root, and make that
+    /// new node the root. This increases the height by 1 and is the opposite of `shrink`.
     pub fn enlarge(&mut self) -> NodeRef<marker::Borrowed, K, V, marker::Mut, marker::Internal> {
         let mut new_node = Box::new(unsafe { InternalNode::new() });
         new_node.edges[0] = self.node;
@@ -155,6 +158,10 @@ impl<K, V> Root<K, V> {
         ret
     }
 
+    /// Remove the root node, using its first child as the new root. This cannot be called when
+    /// the tree consists only of a leaf node. As it is intended only to be called when the root
+    /// has only one edge, no cleanup is done on any of the other children are elements of the root.
+    /// This decreases the height by 1 and is the opposite of `enlarge`.
     pub fn shrink(&mut self) {
         debug_assert!(self.height > 0);
 
@@ -170,6 +177,20 @@ impl<K, V> Root<K, V> {
     }
 }
 
+/// A reference to a node.
+///
+/// This type has a number of paramaters that controls how it acts:
+/// - `Lifetime`: This can either be `Borrowed<'a>` for some `'a` or `Owned`.
+///    When it is `Borrowed<'a>`, the `NodeRef` acts roughly like `&'a Node`,
+///    and when this is `Owned`, the `NodeRef` acts roughly like `Box<Node>`.
+/// - `K` and `V`: These control what types of things are stored in the nodes.
+/// - `Mutability`: This can either be `Immut` or `Mut`. When this is `Immut`,
+///    the `NodeRef` acts roughly like `&`, and when this is `Mut`, the `NodeRef`
+///    acts roughly like `&mut`.
+/// - `Type`: This can be `Leaf`, `Internal`, or `LeafOrInternal`. When this is
+///   `Leaf`, the `NodeRef` points to a leaf node, when this is `Internal` the
+///   `NodeRef` points to an internal node, and when this is `LeafOrInternal` the
+///   `NodeRef` could be pointing to either type of node.
 pub struct NodeRef<Lifetime, K, V, Mutability, Type> {
     height: usize,
     node: BoxedNode<K, V>,
