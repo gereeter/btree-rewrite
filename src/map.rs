@@ -1159,10 +1159,50 @@ impl<'a, K: Ord, V> OccupiedEntry<'a, K, V> {
             }
         };
 
-        if small_leaf.len() < small_leaf.capacity() / 2 {
-            unimplemented!();
-        }
+        handle_underflow(small_leaf.forget_type());
 
         old_val
+    }
+}
+
+fn handle_underflow<Lifetime, K, V>(mut cur_node: NodeRef<Lifetime, K, V, marker::Mut, marker::LeafOrInternal>) {
+    while cur_node.len() < cur_node.capacity() / 2 {
+        if let Ok(parent) = cur_node.ascend() {
+            match parent.left_kv() {
+                Ok(mut left) => {
+                    // steal or merge left
+                    if left.can_merge() {
+                        cur_node = left.merge().into_node().forget_type();
+                    } else {
+                        let (k, v) = left.reborrow_mut().left_edge().descend().pop(); // TODO: Reuse cur_node?
+                        let k = mem::replace(left.reborrow_mut().into_kv().0, k);
+                        let v = mem::replace(left.reborrow_mut().into_kv().1, v);
+                        left.right_edge().descend().insert(0, k, v);
+                        cur_node = left.into_node().forget_type();
+                    }
+                },
+                Err(parent) => match parent.right_kv() {
+                    Ok(mut right) => {
+                        // steal or merge right
+                        if right.can_merge() {
+                            cur_node = right.merge().into_node();
+                        } else {
+                            let (k, v) = right.reborrow_mut().right_edge().descend().remove(0); // TODO: Reuse cur_node?
+                            let k = mem::replace(left.reborrow_mut().into_kv().0, k);
+                            let v = mem::replace(left.reborrow_mut().into_kv().1, v);
+                            right.left_edge().descend().push(k, v);
+                            cur_node = right.into_node().forget_type();
+                        }
+                    },
+                    Err(parent) => {
+                        // The parent node is underfull, so we must be at the root.
+                        parent.into_root().shrink();
+                        return;
+                    }
+                }
+            }
+        } else {
+            return;
+        }
     }
 }

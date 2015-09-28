@@ -226,6 +226,15 @@ impl<Lifetime, K, V, Mutability, Type> NodeRef<Lifetime, K, V, Mutability, Type>
         2 * T - 1
     }
 
+    pub fn forget_type(self) -> NodeRef<Lifetime, K, V, Mutability, marker::LeafOrInternal> {
+        NodeRef {
+            height: self.height,
+            node: self.node,
+            root: self.root,
+            _marker: PhantomData
+        }
+    }
+
     fn reborrow<'a>(&'a self) -> NodeRef<marker::Borrowed<'a>, K, V, marker::Immut, Type> {
         NodeRef {
             height: self.height,
