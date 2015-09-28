@@ -1185,18 +1185,18 @@ fn handle_underflow<Lifetime, K, V>(mut cur_node: NodeRef<Lifetime, K, V, marker
                     Ok(mut right) => {
                         // steal or merge right
                         if right.can_merge() {
-                            cur_node = right.merge().into_node();
+                            cur_node = right.merge().into_node().forget_type();
                         } else {
                             let (k, v) = right.reborrow_mut().right_edge().descend().remove(0); // TODO: Reuse cur_node?
-                            let k = mem::replace(left.reborrow_mut().into_kv().0, k);
-                            let v = mem::replace(left.reborrow_mut().into_kv().1, v);
+                            let k = mem::replace(right.reborrow_mut().into_kv().0, k);
+                            let v = mem::replace(right.reborrow_mut().into_kv().1, v);
                             right.left_edge().descend().push(k, v);
                             cur_node = right.into_node().forget_type();
                         }
                     },
                     Err(parent) => {
                         // The parent node is underfull, so we must be at the root.
-                        parent.into_root().shrink();
+                        parent.into_node().reborrow_mut().into_root_mut().shrink();
                         return;
                     }
                 }
