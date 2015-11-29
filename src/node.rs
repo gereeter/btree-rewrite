@@ -730,12 +730,12 @@ impl<Lifetime, K, V> Handle<NodeRef<Lifetime, K, V, marker::Mut, marker::Interna
         self.reborrow().left_edge().descend().len() + self.reborrow().right_edge().descend().len() + 1 <= self.node.capacity()
     }
 
-    pub fn merge(self) -> Handle<NodeRef<Lifetime, K, V, marker::Mut, marker::Internal>, marker::Edge> {
+    pub fn merge(mut self) -> Handle<NodeRef<Lifetime, K, V, marker::Mut, marker::Internal>, marker::Edge> {
         let self1 = unsafe { ptr::read(&self) };
         let self2 = unsafe { ptr::read(&self) };
-        let left_node = self1.left_edge().descend();
+        let mut left_node = self1.left_edge().descend();
         let left_len = left_node.len();
-        let right_node = self2.right_edge().descend();
+        let mut right_node = self2.right_edge().descend();
 
         // necessary for correctness, but in a private module
         debug_assert!(left_node.len() + right_node.len() + 1 <= self.node.capacity());
