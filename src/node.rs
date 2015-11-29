@@ -727,7 +727,7 @@ impl<Lifetime, K, V> Handle<NodeRef<Lifetime, K, V, marker::Mut, marker::Interna
     }
 
     pub fn can_merge(&self) -> bool {
-        self.reborrow().left_edge().descend().len() + self.reborrow().right_edge().descend().len() + 1 <= self.capacity()
+        self.reborrow().left_edge().descend().len() + self.reborrow().right_edge().descend().len() + 1 <= self.node.capacity()
     }
 
     pub fn merge(self) -> Handle<NodeRef<Lifetime, K, V, marker::Mut, marker::Internal>, marker::Edge> {
@@ -738,24 +738,24 @@ impl<Lifetime, K, V> Handle<NodeRef<Lifetime, K, V, marker::Mut, marker::Interna
         let right_node = self2.right_edge().descend();
 
         // necessary for correctness, but in a private module
-        debug_assert!(left_node.len() + right_node.len() + 1 <= self.capacity());
+        debug_assert!(left_node.len() + right_node.len() + 1 <= self.node.capacity());
 
         unsafe {
-            *left_node.keys_mut().get_unchecked_mut(left_len) = slice_remove(self.keys_mut(), self.idx);
+            *left_node.keys_mut().get_unchecked_mut(left_len) = slice_remove(self.node.keys_mut(), self.idx);
             ptr::copy_nonoverlapping(
                 right_node.keys().as_ptr(),
                 left_node.keys_mut().as_mut_ptr().offset(left_len as isize + 1),
                 right_node.len()
             );
-            *left_node.vals_mut().get_unchecked_mut(left_len) = slice_remove(self.vals_mut(), self.idx);
+            *left_node.vals_mut().get_unchecked_mut(left_len) = slice_remove(self.node.vals_mut(), self.idx);
             ptr::copy_nonoverlapping(
                 right_node.vals().as_ptr(),
                 left_node.vals_mut().as_mut_ptr().offset(left_len as isize + 1),
                 right_node.len()
             );
 
-            slice_remove(self.as_internal_mut().edges, self.idx + 1);
-            for i in self.idx+1..self.len() {
+            slice_remove(&mut self.node.as_internal_mut().edges, self.idx + 1);
+            for i in self.idx+1..self.node.len() {
                 Handle::new(self.node.reborrow_mut(), i).correct_parent_link();
             }
             self.node.as_leaf_mut().len -= 1;
@@ -768,7 +768,7 @@ impl<Lifetime, K, V> Handle<NodeRef<Lifetime, K, V, marker::Mut, marker::Interna
                 );
 
                 for i in left_len+1..left_len+right_node.len()+2 {
-                    Handle::new(left_node.reborrow_mut(), i).correct_parent_link();
+                    Handle::new(left_node.cast_unchecked().reborrow_mut(), i).correct_parent_link();
                 }
 
                 heap::deallocate(*right_node.node.ptr, mem::size_of::<InternalNode<K, V>>(), mem::align_of::<InternalNode<K, V>>());

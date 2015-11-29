@@ -5,6 +5,3 @@ authors = ["Jonathan S <gereeter+code@gmail.com>"]
 
 [dev-dependencies]
 rand = "*"
-
-[dev-dependencies.btree]
-git = "http://github.com/apasel422/btree.git"
