@@ -1166,19 +1166,24 @@ impl<'a, K: Ord, V> OccupiedEntry<'a, K, V> {
 }
 
 fn handle_underflow<Lifetime, K, V>(mut cur_node: NodeRef<Lifetime, K, V, marker::Mut, marker::LeafOrInternal>) {
-    /*
     while cur_node.len() < cur_node.capacity() / 2 {
         if let Ok(parent) = cur_node.ascend() {
             match parent.left_kv() {
                 Ok(mut left) => {
                     // steal or merge left
                     if left.can_merge() {
-                        cur_node = left.merge().into_node().forget_type();
+                        match left.merge() {
+                            Some(node) => cur_node = node.into_node().forget_type(),
+                            None => return,
+                        }
                     } else {
-                        let (k, v) = left.reborrow_mut().left_edge().descend().pop(); // TODO: Reuse cur_node?
-                        let k = mem::replace(left.reborrow_mut().into_kv().0, k);
-                        let v = mem::replace(left.reborrow_mut().into_kv().1, v);
-                        left.right_edge().descend().insert(0, k, v);
+                        let (k, v, edge) = left.reborrow_mut().left_edge().descend().pop(); // TODO: Reuse cur_node?
+                        let k = mem::replace(left.reborrow_mut().into_kv_mut().0, k);
+                        let v = mem::replace(left.reborrow_mut().into_kv_mut().1, v);
+                        match left.reborrow_mut().right_edge().descend().force() {
+                            Leaf(mut leaf) => leaf.push_front(k, v),
+                            Internal(mut internal) => internal.push_front(k, v, edge.unwrap())
+                        }
                         cur_node = left.into_node().forget_type();
                     }
                 },
@@ -1186,18 +1191,24 @@ fn handle_underflow<Lifetime, K, V>(mut cur_node: NodeRef<Lifetime, K, V, marker
                     Ok(mut right) => {
                         // steal or merge right
                         if right.can_merge() {
-                            cur_node = right.merge().into_node().forget_type();
+                            match right.merge() {
+                                Some(node) => cur_node = node.into_node().forget_type(),
+                                None => return,
+                            }
                         } else {
-                            let (k, v) = right.reborrow_mut().right_edge().descend().remove(0); // TODO: Reuse cur_node?
-                            let k = mem::replace(right.reborrow_mut().into_kv().0, k);
-                            let v = mem::replace(right.reborrow_mut().into_kv().1, v);
-                            right.left_edge().descend().push(k, v);
+                            let (k, v, edge) = right.reborrow_mut().right_edge().descend().pop_front(); // TODO: Reuse cur_node?
+                            let k = mem::replace(right.reborrow_mut().into_kv_mut().0, k);
+                            let v = mem::replace(right.reborrow_mut().into_kv_mut().1, v);
+                            match right.reborrow_mut().left_edge().descend().force() {
+                                Leaf(mut leaf) => leaf.push(k, v),
+                                Internal(mut internal) => internal.push(k, v, edge.unwrap())
+                            }
                             cur_node = right.into_node().forget_type();
                         }
                     },
-                    Err(parent) => {
+                    Err(mut parent) => {
                         // The parent node is underfull, so we must be at the root.
-                        parent.into_node().reborrow_mut().into_root_mut().shrink();
+                        parent.reborrow_mut().into_node().into_root_mut().shrink();
                         return;
                     }
                 }
@@ -1206,5 +1217,4 @@ fn handle_underflow<Lifetime, K, V>(mut cur_node: NodeRef<Lifetime, K, V, marker
             return;
         }
     }
-    */
 }
