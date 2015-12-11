@@ -1168,60 +1168,52 @@ impl<'a, K: Ord, V> OccupiedEntry<'a, K, V> {
 fn handle_underflow<'a, K, V>(mut cur_node: NodeRef<marker::Borrowed<'a>, K, V, marker::Mut, marker::LeafOrInternal>) {
     while cur_node.len() < cur_node.capacity() / 2 {
         if let Ok(parent) = cur_node.ascend() {
-            match parent.left_kv() {
-                Ok(mut left) => {
-                    // steal or merge left
-                    if left.can_merge() {
-                        let merged = left.merge().into_node();
-                        if merged.len() == 0 {
-                            merged.into_root_mut().shrink();
-                            return;
-                        } else {
-                            cur_node = merged.forget_type();
-                        }
-                    } else {
-                        unsafe {
-                        let (k, v, edge) = left.reborrow_mut().left_edge().descend().pop();
-                        let k = mem::replace(left.reborrow_mut().into_kv_mut().0, k);
-                        let v = mem::replace(left.reborrow_mut().into_kv_mut().1, v);
-                        match left.reborrow_mut().right_edge().descend().force() {
-                            Leaf(mut leaf) => leaf.push_front(k, v),
-                            Internal(mut internal) => internal.push_front(k, v, edge.unwrap())
-                        }
-                        }
-                        cur_node = left.into_node().forget_type();
-                    }
-                },
+            let (is_left, mut handle) = match parent.left_kv() {
+                Ok(left) => (true, left),
                 Err(parent) => match parent.right_kv() {
-                    Ok(mut right) => {
-                        // steal or merge right
-                        if right.can_merge() {
-                            let merged = right.merge().into_node();
-                            if merged.len() == 0 {
-                                merged.into_root_mut().shrink();
-                                return;
-                            } else {
-                                cur_node = merged.forget_type();
-                            }
-                        } else {
-                            unsafe {
-                            let (k, v, edge) = right.reborrow_mut().right_edge().descend().pop_front();
-                            let k = mem::replace(right.reborrow_mut().into_kv_mut().0, k);
-                            let v = mem::replace(right.reborrow_mut().into_kv_mut().1, v);
-                            match right.reborrow_mut().left_edge().descend().force() {
-                                Leaf(mut leaf) => leaf.push(k, v),
-                                Internal(mut internal) => internal.push(k, v, edge.unwrap())
-                            }
-                            }
-                            cur_node = right.into_node().forget_type();
-                        }
-                    },
+                    Ok(right) => (false, right),
                     Err(parent) => {
                         // The parent node is underfull, so we must be at the root.
                         parent.into_node().into_root_mut().shrink();
                         return;
                     }
                 }
+            };
+
+            if handle.can_merge() {
+                let merged = handle.merge().into_node();
+                if merged.len() == 0 {
+                    merged.into_root_mut().shrink();
+                    return;
+                } else {
+                    cur_node = merged.forget_type();
+                }
+            } else {
+                unsafe {
+                    let (k, v, edge) = if is_left {
+                        handle.reborrow_mut().left_edge().descend().pop()
+                    } else {
+                        handle.reborrow_mut().right_edge().descend().pop_front()
+                    };
+
+                    let k = mem::replace(handle.reborrow_mut().into_kv_mut().0, k);
+                    let v = mem::replace(handle.reborrow_mut().into_kv_mut().1, v);
+
+                    // TODO: reuse cur_node?
+                    if is_left {
+                        match handle.reborrow_mut().right_edge().descend().force() {
+                            Leaf(mut leaf) => leaf.push_front(k, v),
+                            Internal(mut internal) => internal.push_front(k, v, edge.unwrap())
+                        }
+                    } else {
+                        match handle.reborrow_mut().left_edge().descend().force() {
+                            Leaf(mut leaf) => leaf.push(k, v),
+                            Internal(mut internal) => internal.push(k, v, edge.unwrap())
+                        }
+                    }
+                }
+
+                cur_node = handle.into_node().forget_type();
             }
         } else {
             return;
