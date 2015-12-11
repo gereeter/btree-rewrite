@@ -596,8 +596,8 @@ impl<Lifetime, K, V, Mutability, NodeType, HandleType> Handle<NodeRef<Lifetime, 
 }
 
 impl<Lifetime, K, V, NodeType, HandleType> Handle<NodeRef<Lifetime, K, V, marker::Mut, NodeType>, HandleType> {
-    pub fn reborrow_mut(&mut self) -> Handle<NodeRef<marker::Borrowed, K, V, marker::Mut, NodeType>, HandleType> {
-        unsafe { Handle::new(self.node.reborrow_mut(), self.idx) }
+    pub unsafe fn reborrow_mut(&mut self) -> Handle<NodeRef<marker::Borrowed, K, V, marker::Mut, NodeType>, HandleType> {
+        Handle::new(self.node.reborrow_mut(), self.idx)
     }
 }
 
