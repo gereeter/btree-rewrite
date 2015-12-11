@@ -840,7 +840,7 @@ impl<Lifetime, K, V> Handle<NodeRef<Lifetime, K, V, marker::Mut, marker::Interna
         self.reborrow().left_edge().descend().len() + self.reborrow().right_edge().descend().len() + 1 <= self.node.capacity()
     }
 
-    pub fn merge(mut self) -> Option<Handle<NodeRef<Lifetime, K, V, marker::Mut, marker::Internal>, marker::Edge>> {
+    pub fn merge(mut self) -> Handle<NodeRef<Lifetime, K, V, marker::Mut, marker::Internal>, marker::Edge> {
         let self1 = unsafe { ptr::read(&self) };
         let self2 = unsafe { ptr::read(&self) };
         let mut left_node = self1.left_edge().descend();
@@ -889,12 +889,7 @@ impl<Lifetime, K, V> Handle<NodeRef<Lifetime, K, V, marker::Mut, marker::Interna
 
             left_node.as_leaf_mut().len += right_len as u16 + 1;
 
-            if self.node.len() == 0 {
-                self.node.reborrow_mut().into_root_mut().shrink();
-                None
-            } else {
-                Some(Handle::new(self.node, self.idx))
-            }
+            Handle::new(self.node, self.idx)
         }
     }
 }

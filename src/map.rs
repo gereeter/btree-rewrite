@@ -1172,9 +1172,12 @@ fn handle_underflow<'a, K, V>(mut cur_node: NodeRef<marker::Borrowed<'a>, K, V, 
                 Ok(mut left) => {
                     // steal or merge left
                     if left.can_merge() {
-                        match left.merge() {
-                            Some(node) => cur_node = node.into_node().forget_type(),
-                            None => return,
+                        let merged = left.merge().into_node();
+                        if merged.len() == 0 {
+                            merged.into_root_mut().shrink();
+                            return;
+                        } else {
+                            cur_node = merged.forget_type();
                         }
                     } else {
                         let (k, v, edge) = left.reborrow_mut().left_edge().descend().pop(); // TODO: Reuse cur_node?
@@ -1191,9 +1194,12 @@ fn handle_underflow<'a, K, V>(mut cur_node: NodeRef<marker::Borrowed<'a>, K, V, 
                     Ok(mut right) => {
                         // steal or merge right
                         if right.can_merge() {
-                            match right.merge() {
-                                Some(node) => cur_node = node.into_node().forget_type(),
-                                None => return,
+                            let merged = right.merge().into_node();
+                            if merged.len() == 0 {
+                                merged.into_root_mut().shrink();
+                                return;
+                            } else {
+                                cur_node = merged.forget_type();
                             }
                         } else {
                             let (k, v, edge) = right.reborrow_mut().right_edge().descend().pop_front(); // TODO: Reuse cur_node?
@@ -1206,7 +1212,7 @@ fn handle_underflow<'a, K, V>(mut cur_node: NodeRef<marker::Borrowed<'a>, K, V, 
                             cur_node = right.into_node().forget_type();
                         }
                     },
-                    Err(mut parent) => {
+                    Err(parent) => {
                         // The parent node is underfull, so we must be at the root.
                         parent.into_node().into_root_mut().shrink();
                         return;
