@@ -1165,7 +1165,7 @@ impl<'a, K: Ord, V> OccupiedEntry<'a, K, V> {
     }
 }
 
-fn handle_underflow<Lifetime, K, V>(mut cur_node: NodeRef<Lifetime, K, V, marker::Mut, marker::LeafOrInternal>) {
+fn handle_underflow<'a, K, V>(mut cur_node: NodeRef<marker::Borrowed<'a>, K, V, marker::Mut, marker::LeafOrInternal>) {
     while cur_node.len() < cur_node.capacity() / 2 {
         if let Ok(parent) = cur_node.ascend() {
             match parent.left_kv() {
@@ -1208,7 +1208,7 @@ fn handle_underflow<Lifetime, K, V>(mut cur_node: NodeRef<Lifetime, K, V, marker
                     },
                     Err(mut parent) => {
                         // The parent node is underfull, so we must be at the root.
-                        parent.reborrow_mut().into_node().into_root_mut().shrink();
+                        parent.into_node().into_root_mut().shrink();
                         return;
                     }
                 }
