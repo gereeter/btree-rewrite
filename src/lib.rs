@@ -30,3 +30,7 @@ extern crate alloc;
 mod node;
 mod search;
 pub mod map;
+
+pub use map::BTreeMap;
+pub use map::Entry::{self, Occupied, Vacant};
+pub use collections::Bound::{self, Included, Excluded};

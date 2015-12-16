@@ -161,7 +161,7 @@ impl<K: Ord, V> BTreeMap<K, V> {
     /// # Examples
     ///
     /// ```
-    /// use std::collections::BTreeMap;
+    /// use btree_rewrite::BTreeMap;
     ///
     /// let mut a = BTreeMap::new();
     /// a.insert(1, "a");
@@ -180,7 +180,7 @@ impl<K: Ord, V> BTreeMap<K, V> {
     /// # Examples
     ///
     /// ```
-    /// use std::collections::BTreeMap;
+    /// use btree_rewrite::BTreeMap;
     ///
     /// let mut map = BTreeMap::new();
     /// map.insert(1, "a");
@@ -202,7 +202,7 @@ impl<K: Ord, V> BTreeMap<K, V> {
     /// # Examples
     ///
     /// ```
-    /// use std::collections::BTreeMap;
+    /// use btree_rewrite::BTreeMap;
     ///
     /// let mut map = BTreeMap::new();
     /// map.insert(1, "a");
@@ -221,7 +221,7 @@ impl<K: Ord, V> BTreeMap<K, V> {
     /// # Examples
     ///
     /// ```
-    /// use std::collections::BTreeMap;
+    /// use btree_rewrite::BTreeMap;
     ///
     /// let mut map = BTreeMap::new();
     /// map.insert(1, "a");
@@ -244,7 +244,7 @@ impl<K: Ord, V> BTreeMap<K, V> {
     /// # Examples
     ///
     /// ```
-    /// use std::collections::BTreeMap;
+    /// use btree_rewrite::BTreeMap;
     ///
     /// let mut map = BTreeMap::new();
     /// assert_eq!(map.insert(37, "a"), None);
@@ -273,7 +273,7 @@ impl<K: Ord, V> BTreeMap<K, V> {
     /// # Examples
     ///
     /// ```
-    /// use std::collections::BTreeMap;
+    /// use btree_rewrite::BTreeMap;
     ///
     /// let mut map = BTreeMap::new();
     /// map.insert(1, "a");
@@ -302,8 +302,8 @@ impl<K: Ord, V> BTreeMap<K, V> {
     /// ```
     /// #![feature(btree_range, collections_bound)]
     ///
-    /// use std::collections::BTreeMap;
-    /// use std::collections::Bound::{Included, Unbounded};
+    /// use btree_rewrite::BTreeMap;
+    /// use btree_rewrite::Bound::{Included, Unbounded};
     ///
     /// let mut map = BTreeMap::new();
     /// map.insert(3, "a");
@@ -371,8 +371,8 @@ impl<K: Ord, V> BTreeMap<K, V> {
     /// ```
     /// #![feature(btree_range, collections_bound)]
     ///
-    /// use std::collections::BTreeMap;
-    /// use std::collections::Bound::{Included, Excluded};
+    /// use btree_rewrite::BTreeMap;
+    /// use btree_rewrite::Bound::{Included, Excluded};
     ///
     /// let mut map: BTreeMap<&str, i32> = ["Alice", "Bob", "Carol", "Cheryl"].iter()
     ///                                                                       .map(|&s| (s, 0))
@@ -439,7 +439,7 @@ impl<K: Ord, V> BTreeMap<K, V> {
     /// # Examples
     ///
     /// ```
-    /// use std::collections::BTreeMap;
+    /// use btree_rewrite::BTreeMap;
     ///
     /// let mut count: BTreeMap<&str, usize> = BTreeMap::new();
     ///
@@ -962,7 +962,7 @@ impl<K, V> BTreeMap<K, V> {
     /// # Examples
     ///
     /// ```
-    /// use std::collections::BTreeMap;
+    /// use btree_rewrite::BTreeMap;
     ///
     /// let mut map = BTreeMap::new();
     /// map.insert(1, "a");
@@ -991,7 +991,7 @@ impl<K, V> BTreeMap<K, V> {
     /// # Examples
     ///
     /// ```
-    /// use std::collections::BTreeMap;
+    /// use btree_rewrite::BTreeMap;
     ///
     /// let mut map = BTreeMap::new();
     /// map.insert("a", 1);
@@ -1022,7 +1022,7 @@ impl<K, V> BTreeMap<K, V> {
     /// # Examples
     ///
     /// ```
-    /// use std::collections::BTreeMap;
+    /// use btree_rewrite::BTreeMap;
     ///
     /// let mut a = BTreeMap::new();
     /// assert_eq!(a.len(), 0);
@@ -1039,7 +1039,7 @@ impl<K, V> BTreeMap<K, V> {
     /// # Examples
     ///
     /// ```
-    /// use std::collections::BTreeMap;
+    /// use btree_rewrite::BTreeMap;
     ///
     /// let mut a = BTreeMap::new();
     /// assert!(a.is_empty());
