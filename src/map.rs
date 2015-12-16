@@ -1160,7 +1160,26 @@ impl<'a, K: Ord, V> OccupiedEntry<'a, K, V> {
             }
         };
 
-        handle_underflow(small_leaf.forget_type());
+        // Handle underflow
+        let mut cur_node = small_leaf.forget_type();
+        while cur_node.len() < cur_node.capacity() / 2 {
+            match handle_underfull_node(cur_node) {
+                AtRoot => break,
+                EmptyParent(parent) => {
+                    // We must be at the root
+                    parent.into_root_mut().shrink();
+                    break;
+                },
+                Merged(parent) => if parent.len() == 0 {
+                    // We must be at the root
+                    parent.into_root_mut().shrink();
+                    break;
+                } else {
+                    cur_node = parent.forget_type();
+                },
+                Stole(_) => break
+            }
+        }
 
         old_val
     }
@@ -1171,27 +1190,6 @@ enum UnderflowResult<'a, K, V> {
     EmptyParent(NodeRef<marker::Borrowed<'a>, K, V, marker::Mut, marker::Internal>),
     Merged(NodeRef<marker::Borrowed<'a>, K, V, marker::Mut, marker::Internal>),
     Stole(NodeRef<marker::Borrowed<'a>, K, V, marker::Mut, marker::Internal>)
-}
-
-fn handle_underflow<'a, K, V>(mut cur_node: NodeRef<marker::Borrowed<'a>, K, V, marker::Mut, marker::LeafOrInternal>) {
-    while cur_node.len() < cur_node.capacity() / 2 {
-        match handle_underfull_node(cur_node) {
-            AtRoot => return,
-            EmptyParent(parent) => {
-                // We must be at the root
-                parent.into_root_mut().shrink();
-                return;
-            },
-            Merged(parent) => if parent.len() == 0 {
-                // We must be at the root
-                parent.into_root_mut().shrink();
-                return;
-            } else {
-                cur_node = parent.forget_type();
-            },
-            Stole(_) => return
-        }
-    }
 }
 
 fn handle_underfull_node<'a, K, V>(node: NodeRef<marker::Borrowed<'a>, K, V, marker::Mut, marker::LeafOrInternal>) -> UnderflowResult<'a, K, V> {
