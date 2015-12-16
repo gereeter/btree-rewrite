@@ -62,6 +62,69 @@ impl<K, V> Drop for BTreeMap<K, V> {
     }
 }
 
+impl<K: Clone, V: Clone> Clone for BTreeMap<K, V> {
+    fn clone(&self) -> BTreeMap<K, V> {
+        fn create_chain<K, V>(height: usize) -> node::Root<K, V> {
+            let mut ret = node::Root::new_leaf();
+            for _ in 0..height {
+                ret.enlarge();
+            }
+            ret
+        }
+
+        let mut out_root = create_chain(self.root.as_ref().height());
+
+        {
+            let mut in_node = first_leaf_edge(self.root.as_ref()).into_node();
+            let mut out_node = first_leaf_edge(out_root.as_mut()).into_node();
+            'main: loop {
+                // Copy the leaf node
+                let mut in_edge = in_node.first_edge();
+                while let Ok(kv) = in_edge.right_kv() {
+                    let (k, v) = kv.into_kv();
+                    out_node.push(k.clone(), v.clone());
+
+                    in_edge = kv.right_edge();
+                }
+
+                // Find the next leaf node
+                let mut internal_in_edge = match in_node.ascend() {
+                    Ok(parent) => parent,
+                    Err(_) => break
+                };
+                let mut internal_out_node = out_node.ascend().ok().unwrap().into_node();
+                let internal_kv;
+                loop {
+                    match internal_in_edge.right_kv() {
+                        Ok(kv) => {
+                            internal_kv = kv;
+                            break;
+                        },
+                        Err(edge) => {
+                            internal_in_edge = match edge.into_node().ascend() {
+                                Ok(parent) => parent,
+                                Err(_) => break 'main
+                            };
+                            internal_out_node = internal_out_node.ascend().ok().unwrap().into_node();
+                        }
+                    }
+                }
+
+                let (k, v) = internal_kv.into_kv();
+                internal_out_node.push(k.clone(), v.clone(), create_chain(internal_kv.into_node().height() - 1));
+
+                in_node = first_leaf_edge(internal_kv.right_edge().descend()).into_node();
+                out_node = first_leaf_edge(internal_out_node.last_edge().descend()).into_node();
+            }
+        }
+
+        BTreeMap {
+            root: out_root,
+            length: self.length
+        }
+    }
+}
+
 /// An iterator over a BTreeMap's entries.
 pub struct Iter<'a, K: 'a, V: 'a> {
     range: Range<'a, K, V>,

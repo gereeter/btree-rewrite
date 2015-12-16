@@ -50,6 +50,8 @@ pub fn test_rand_large() {
     for i in log {
         assert_eq!(map.get(&i).cloned(), Some(i));
     }
+
+    assert_eq!(map, map.clone());
 }
 
 #[test]
@@ -95,6 +97,8 @@ fn test_basic_large() {
         assert_eq!(map.remove(&(2*i+1)), Some(i*200 + 100));
         assert_eq!(map.len(), size/2 - i - 1);
     }
+
+    assert_eq!(map, map.clone());
 }
 
 #[test]
@@ -111,6 +115,8 @@ fn test_basic_small() {
     assert_eq!(map.remove(&1), Some(2));
     assert_eq!(map.remove(&2), Some(4));
     assert_eq!(map.remove(&1), None);
+
+    assert_eq!(map, map.clone());
 }
 
 #[test]
@@ -315,6 +321,8 @@ fn test_entry(){
     }
     assert_eq!(map.get(&10).unwrap(), &1000);
     assert_eq!(map.len(), 6);
+
+    assert_eq!(map, map.clone());
 }
 
 #[test]
