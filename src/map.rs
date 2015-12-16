@@ -1213,7 +1213,7 @@ fn handle_underflow<'a, K, V>(mut cur_node: NodeRef<marker::Borrowed<'a>, K, V, 
                     }
                 }
 
-                cur_node = handle.into_node().forget_type();
+                return;
             }
         } else {
             return;
