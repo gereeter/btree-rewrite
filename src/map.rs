@@ -1165,11 +1165,7 @@ impl<'a, K: Ord, V> OccupiedEntry<'a, K, V> {
         while cur_node.len() < cur_node.capacity() / 2 {
             match handle_underfull_node(cur_node) {
                 AtRoot => break,
-                EmptyParent(parent) => {
-                    // We must be at the root
-                    parent.into_root_mut().shrink();
-                    break;
-                },
+                EmptyParent(_) => unreachable!(),
                 Merged(parent) => if parent.len() == 0 {
                     // We must be at the root
                     parent.into_root_mut().shrink();
