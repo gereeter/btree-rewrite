@@ -1,5 +1,5 @@
 #![feature(core, collections, nonzero, collections_bound)]
-#![feature(alloc, heap_api, core_intrinsics)]
+#![feature(alloc, heap_api, core_intrinsics, unique)]
 
 // This is an attempt at an implementation following the ideal
 //

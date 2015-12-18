@@ -6,6 +6,7 @@ extern crate rand;
 
 use collections::Bound::{self, Included, Excluded, Unbounded};
 use btree_rewrite::map::*;
+use btree_rewrite::map::Entry::*;
 use std::iter::range_inclusive;
 use std::rc::Rc;
 

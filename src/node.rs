@@ -1,3 +1,13 @@
+// Copyright 2014 The Rust Project Developers. See the COPYRIGHT
+// file at the top-level directory of this distribution and at
+// http://rust-lang.org/COPYRIGHT.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
 // This is an attempt at an implementation following the ideal
 //
 // ```
@@ -5,7 +15,7 @@
 //     height: usize,
 //     root: Option<Box<Node<K, V, height>>>
 // }
-//   
+//
 // struct Node<K, V, height: usize> {
 //     keys: [K; 2 * T - 1],
 //     vals: [V; 2 * T - 1],
@@ -18,14 +28,17 @@
 // }
 // ```
 //
-// Since Rust doesn't acutally have dependent types and polymorphic recursion, we make do with lots of unsafety.
+// Since Rust doesn't acutally have dependent types and polymorphic recursion,
+// we make do with lots of unsafety.
 
 use alloc::heap;
 use core::marker::PhantomData;
 use core::mem;
 use core::nonzero::NonZero;
-use core::ptr;
+use core::ptr::{self, Unique};
 use core::slice;
+
+use collections::boxed::Box;
 
 const T: usize = 6;
 
@@ -49,7 +62,8 @@ impl<K, V> LeafNode<K, V> {
     }
 }
 
-// We use repr(C) so that a pointer to an internal node can be directly used as a pointer to a leaf node
+// We use repr(C) so that a pointer to an internal node can be
+// directly used as a pointer to a leaf node
 #[repr(C)]
 struct InternalNode<K, V> {
     data: LeafNode<K, V>,
@@ -66,32 +80,35 @@ impl<K, V> InternalNode<K, V> {
 }
 
 struct BoxedNode<K, V> {
-    ptr: NonZero<*mut u8>, // we don't know if this points to a leaf node or an internal node
-    _marker: PhantomData<*mut (K, V)>
-}
-
-impl<K, V> Copy for BoxedNode<K, V> { }
-impl<K, V> Clone for BoxedNode<K, V> {
-    fn clone(&self) -> Self {
-        *self
-    }
+    ptr: Unique<LeafNode<K, V>> // we don't know if this points to a leaf node or an internal node
 }
 
 impl<K, V> BoxedNode<K, V> {
     fn from_leaf(node: Box<LeafNode<K, V>>) -> Self {
         unsafe {
-            BoxedNode { ptr: NonZero::new(Box::into_raw(node) as *mut u8), _marker: PhantomData }
+            BoxedNode { ptr: Unique::new(Box::into_raw(node)) }
         }
     }
 
     fn from_internal(node: Box<InternalNode<K, V>>) -> Self {
         unsafe {
-            BoxedNode { ptr: NonZero::new(Box::into_raw(node) as *mut u8), _marker: PhantomData }
+            BoxedNode { ptr: Unique::new(Box::into_raw(node) as *mut LeafNode<K, V>) }
+        }
+    }
+
+    unsafe fn from_ptr(ptr: NonZero<*mut LeafNode<K, V>>) -> Self {
+        BoxedNode { ptr: Unique::new(*ptr) }
+    }
+
+    fn as_ptr(&self) -> NonZero<*mut LeafNode<K, V>> {
+        unsafe {
+            NonZero::new(*self.ptr)
         }
     }
 }
 
-/// An owned tree. Note that despite being owned, this does not have a destructor, and must be cleaned up manually.
+/// An owned tree. Note that despite being owned, this does not have a destructor,
+/// and must be cleaned up manually.
 pub struct Root<K, V> {
     node: BoxedNode<K, V>,
     height: usize
@@ -108,45 +125,49 @@ impl<K, V> Root<K, V> {
         }
     }
 
-    pub fn as_ref(&self) -> NodeRef<marker::Borrowed, K, V, marker::Immut, marker::LeafOrInternal> {
+    pub fn as_ref(&self)
+            -> NodeRef<marker::Borrowed, K, V, marker::Immut, marker::LeafOrInternal> {
         NodeRef {
             height: self.height,
-            node: self.node,
+            node: self.node.as_ptr(),
             root: self as *const _ as *mut _,
             _marker: PhantomData,
         }
     }
 
-    pub fn as_mut(&mut self) -> NodeRef<marker::Borrowed, K, V, marker::Mut, marker::LeafOrInternal> {
+    pub fn as_mut(&mut self)
+            -> NodeRef<marker::Borrowed, K, V, marker::Mut, marker::LeafOrInternal> {
         NodeRef {
             height: self.height,
-            node: self.node,
+            node: self.node.as_ptr(),
             root: self as *mut _,
             _marker: PhantomData,
         }
     }
 
-    pub fn into_ref(self) -> NodeRef<marker::Owned, K, V, marker::Mut, marker::LeafOrInternal> {
+    pub fn into_ref(self)
+            -> NodeRef<marker::Owned, K, V, marker::Mut, marker::LeafOrInternal> {
         NodeRef {
             height: self.height,
-            node: self.node,
-            root: ptr::null_mut(), // TODO: Is there anything better to do here?
+            node: self.node.as_ptr(),
+            root: ptr::null_mut(), // FIXME: Is there anything better to do here?
             _marker: PhantomData,
         }
     }
 
     /// Add a new internal node with a single edge, pointing to the previous root, and make that
     /// new node the root. This increases the height by 1 and is the opposite of `shrink`.
-    pub fn enlarge(&mut self) -> NodeRef<marker::Borrowed, K, V, marker::Mut, marker::Internal> {
+    pub fn enlarge(&mut self)
+            -> NodeRef<marker::Borrowed, K, V, marker::Mut, marker::Internal> {
         let mut new_node = Box::new(unsafe { InternalNode::new() });
-        new_node.edges[0] = self.node;
+        new_node.edges[0] = unsafe { BoxedNode::from_ptr(self.node.as_ptr()) };
 
         self.node = BoxedNode::from_internal(new_node);
         self.height += 1;
 
         let mut ret = NodeRef {
             height: self.height,
-            node: self.node,
+            node: self.node.as_ptr(),
             root: self as *mut _,
             _marker: PhantomData
         };
@@ -165,14 +186,24 @@ impl<K, V> Root<K, V> {
     pub fn shrink(&mut self) {
         debug_assert!(self.height > 0);
 
-        let top = *self.node.ptr;
+        let top = *self.node.ptr as *mut u8;
 
-        self.node = unsafe { self.as_mut().cast_unchecked::<marker::Internal>().first_edge().descend().node };
+        self.node = unsafe {
+            BoxedNode::from_ptr(self.as_mut()
+                                    .cast_unchecked::<marker::Internal>()
+                                    .first_edge()
+                                    .descend()
+                                    .node)
+        };
         self.height -= 1;
         self.as_mut().as_leaf_mut().parent = ptr::null_mut();
 
         unsafe {
-            heap::deallocate(top, mem::size_of::<InternalNode<K, V>>(), mem::align_of::<InternalNode<K, V>>());
+            heap::deallocate(
+                top,
+                mem::size_of::<InternalNode<K, V>>(),
+                mem::align_of::<InternalNode<K, V>>()
+            );
         }
     }
 }
@@ -193,7 +224,7 @@ impl<K, V> Root<K, V> {
 ///   `NodeRef` could be pointing to either type of node.
 pub struct NodeRef<Lifetime, K, V, Mutability, Type> {
     height: usize,
-    node: BoxedNode<K, V>,
+    node: NonZero<*mut LeafNode<K, V>>,
     root: *mut Root<K, V>,
     _marker: PhantomData<(Lifetime, Mutability, Type)>
 }
@@ -205,16 +236,20 @@ impl<'a, K: 'a, V: 'a, Type> Clone for NodeRef<marker::Borrowed<'a>, K, V, marke
     }
 }
 
-unsafe impl<Lifetime, K: Sync, V: Sync, Mutability, Type> Sync for NodeRef<Lifetime, K, V, Mutability, Type> { }
+unsafe impl<Lifetime, K: Sync, V: Sync, Mutability, Type> Sync
+    for NodeRef<Lifetime, K, V, Mutability, Type> { }
 
-unsafe impl<'a, K: Sync + 'a, V: Sync + 'a, Type> Send for NodeRef<marker::Borrowed<'a>, K, V, marker::Immut, Type> { }
-unsafe impl<'a, K: Send + 'a, V: Send + 'a, Type> Send for NodeRef<marker::Borrowed<'a>, K, V, marker::Mut, Type> { }
-unsafe impl<K: Send, V: Send, Mutability, Type> Send for NodeRef<marker::Owned, K, V, Mutability, Type> { }
+unsafe impl<'a, K: Sync + 'a, V: Sync + 'a, Type> Send
+   for NodeRef<marker::Borrowed<'a>, K, V, marker::Immut, Type> { }
+unsafe impl<'a, K: Send + 'a, V: Send + 'a, Type> Send
+   for NodeRef<marker::Borrowed<'a>, K, V, marker::Mut, Type> { }
+unsafe impl<K: Send, V: Send, Mutability, Type> Send
+   for NodeRef<marker::Owned, K, V, Mutability, Type> { }
 
 impl<Lifetime, K, V, Mutability> NodeRef<Lifetime, K, V, Mutability, marker::Internal> {
     fn as_internal(&self) -> &InternalNode<K, V> {
         unsafe {
-            &*(*self.node.ptr as *const InternalNode<K, V>)
+            &*(*self.node as *const InternalNode<K, V>)
         }
     }
 }
@@ -222,7 +257,7 @@ impl<Lifetime, K, V, Mutability> NodeRef<Lifetime, K, V, Mutability, marker::Int
 impl<Lifetime, K, V> NodeRef<Lifetime, K, V, marker::Mut, marker::Internal> {
     fn as_internal_mut(&mut self) -> &mut InternalNode<K, V> {
         unsafe {
-            &mut *(*self.node.ptr as *mut InternalNode<K, V>)
+            &mut *(*self.node as *mut InternalNode<K, V>)
         }
     }
 }
@@ -266,7 +301,7 @@ impl<Lifetime, K, V, Mutability, Type> NodeRef<Lifetime, K, V, Mutability, Type>
 
     fn as_leaf(&self) -> &LeafNode<K, V> {
         unsafe {
-            &*(*self.node.ptr as *const LeafNode<K, V>)
+            &**self.node
         }
     }
 
@@ -278,16 +313,26 @@ impl<Lifetime, K, V, Mutability, Type> NodeRef<Lifetime, K, V, Mutability, Type>
         self.reborrow().into_slices().1
     }
 
-    pub fn ascend(self) -> Result<Handle<NodeRef<Lifetime, K, V, Mutability, marker::Internal>, marker::Edge>, Self> {
+    pub fn ascend(self) -> Result<
+        Handle<
+            NodeRef<
+                Lifetime,
+                K, V,
+                Mutability,
+                marker::Internal
+            >,
+            marker::Edge
+        >,
+        Self
+    > {
         if self.as_leaf().parent.is_null() {
             Err(self)
         } else {
             Ok(Handle {
                 node: NodeRef {
                     height: self.height + 1,
-                    node: BoxedNode {
-                        ptr: unsafe { NonZero::new(self.as_leaf().parent as *mut u8) },
-                        _marker: PhantomData
+                    node: unsafe {
+                        NonZero::new(self.as_leaf().parent as *mut LeafNode<K, V>)
                     },
                     root: self.root,
                     _marker: PhantomData
@@ -309,7 +354,17 @@ impl<Lifetime, K, V, Mutability, Type> NodeRef<Lifetime, K, V, Mutability, Type>
 }
 
 impl<K, V> NodeRef<marker::Owned, K, V, marker::Mut, marker::Leaf> {
-    pub unsafe fn deallocate_and_ascend(mut self) -> Option<Handle<NodeRef<marker::Owned, K, V, marker::Mut, marker::Internal>, marker::Edge>> {
+    pub unsafe fn deallocate_and_ascend(mut self) -> Option<
+        Handle<
+            NodeRef<
+                marker::Owned,
+                K, V,
+                marker::Mut,
+                marker::Internal
+            >,
+            marker::Edge
+        >
+    > {
         let ptr = self.as_leaf_mut() as *mut LeafNode<K, V> as *mut u8;
         let ret = self.ascend().ok();
         heap::deallocate(ptr, mem::size_of::<LeafNode<K, V>>(), mem::align_of::<LeafNode<K, V>>());
@@ -318,16 +373,32 @@ impl<K, V> NodeRef<marker::Owned, K, V, marker::Mut, marker::Leaf> {
 }
 
 impl<K, V> NodeRef<marker::Owned, K, V, marker::Mut, marker::Internal> {
-    pub unsafe fn deallocate_and_ascend(mut self) -> Option<Handle<NodeRef<marker::Owned, K, V, marker::Mut, marker::Internal>, marker::Edge>> {
+    pub unsafe fn deallocate_and_ascend(mut self) -> Option<
+        Handle<
+            NodeRef<
+                marker::Owned,
+                K, V,
+                marker::Mut,
+                marker::Internal
+            >,
+            marker::Edge
+        >
+    > {
         let ptr = self.as_internal_mut() as *mut InternalNode<K, V> as *mut u8;
         let ret = self.ascend().ok();
-        heap::deallocate(ptr, mem::size_of::<InternalNode<K, V>>(), mem::align_of::<InternalNode<K, V>>());
+        heap::deallocate(
+            ptr,
+            mem::size_of::<InternalNode<K, V>>(),
+            mem::align_of::<InternalNode<K, V>>()
+        );
         ret
     }
 }
 
 impl<Lifetime, K, V, Type> NodeRef<Lifetime, K, V, marker::Mut, Type> {
-    unsafe fn cast_unchecked<NewType>(&mut self) -> NodeRef<marker::Borrowed, K, V, marker::Mut, NewType> {
+    unsafe fn cast_unchecked<NewType>(&mut self)
+            -> NodeRef<marker::Borrowed, K, V, marker::Mut, NewType> {
+
         NodeRef {
             height: self.height,
             node: self.node,
@@ -347,7 +418,7 @@ impl<Lifetime, K, V, Type> NodeRef<Lifetime, K, V, marker::Mut, Type> {
 
     fn as_leaf_mut(&mut self) -> &mut LeafNode<K, V> {
         unsafe {
-            &mut *(*self.node.ptr as *mut LeafNode<K, V>)
+            &mut **self.node
         }
     }
 
@@ -440,7 +511,6 @@ impl<Lifetime, K, V> NodeRef<Lifetime, K, V, marker::Mut, marker::Internal> {
             ptr::write(self.keys_mut().get_unchecked_mut(idx), key);
             ptr::write(self.vals_mut().get_unchecked_mut(idx), val);
             ptr::write(self.as_internal_mut().edges.get_unchecked_mut(idx + 1), edge.node);
-            mem::forget(edge);
 
             Handle::new(self.reborrow_mut(), idx + 1).correct_parent_link();
         }
@@ -456,8 +526,14 @@ impl<Lifetime, K, V> NodeRef<Lifetime, K, V, marker::Mut, marker::Internal> {
         unsafe {
             slice_insert(self.keys_mut(), 0, key);
             slice_insert(self.vals_mut(), 0, val);
-            slice_insert(slice::from_raw_parts_mut(self.as_internal_mut().edges.as_mut_ptr(), self.len()+1), 0, edge.node);
-            mem::forget(edge);
+            slice_insert(
+                slice::from_raw_parts_mut(
+                    self.as_internal_mut().edges.as_mut_ptr(),
+                    self.len()+1
+                ),
+                0,
+                edge.node
+            );
 
             self.as_leaf_mut().len += 1;
 
@@ -506,7 +582,14 @@ impl<Lifetime, K, V> NodeRef<Lifetime, K, V, marker::Mut, marker::LeafOrInternal
             let edge = match self.reborrow_mut().force() {
                 ForceResult::Leaf(_) => None,
                 ForceResult::Internal(mut internal) => {
-                    let edge = slice_remove(slice::from_raw_parts_mut(internal.as_internal_mut().edges.as_mut_ptr(), old_len+1), 0);
+                    let edge = slice_remove(
+                        slice::from_raw_parts_mut(
+                            internal.as_internal_mut().edges.as_mut_ptr(),
+                            old_len+1
+                        ),
+                        0
+                    );
+
                     let mut new_root = Root { node: edge, height: internal.height - 1 };
                     new_root.as_mut().as_leaf_mut().parent = ptr::null_mut();
 
@@ -526,7 +609,10 @@ impl<Lifetime, K, V> NodeRef<Lifetime, K, V, marker::Mut, marker::LeafOrInternal
 }
 
 impl<Lifetime, K, V, Mutability> NodeRef<Lifetime, K, V, Mutability, marker::LeafOrInternal> {
-    pub fn force(self) -> ForceResult<NodeRef<Lifetime, K, V, Mutability, marker::Leaf>, NodeRef<Lifetime, K, V, Mutability, marker::Internal>> {
+    pub fn force(self) -> ForceResult<
+        NodeRef<Lifetime, K, V, Mutability, marker::Leaf>,
+        NodeRef<Lifetime, K, V, Mutability, marker::Internal>
+    > {
         if self.height == 0 {
             ForceResult::Leaf(NodeRef {
                 height: self.height,
@@ -582,26 +668,40 @@ impl<Node> Handle<Node, marker::KV> {
     }
 }
 
-impl<Lifetime, K, V, Mutability, NodeType, HandleType> PartialEq for Handle<NodeRef<Lifetime, K, V, Mutability, NodeType>, HandleType> {
+impl<Lifetime, K, V, Mutability, NodeType, HandleType> PartialEq
+        for Handle<NodeRef<Lifetime, K, V, Mutability, NodeType>, HandleType> {
+
     fn eq(&self, other: &Self) -> bool {
-        self.node.node.ptr == other.node.node.ptr && self.idx == other.idx
+        self.node.node == other.node.node && self.idx == other.idx
     }
 }
 
-impl<Lifetime, K, V, Mutability, NodeType, HandleType> Handle<NodeRef<Lifetime, K, V, Mutability, NodeType>, HandleType> {
-    pub fn reborrow(&self) -> Handle<NodeRef<marker::Borrowed, K, V, marker::Immut, NodeType>, HandleType> {
+impl<Lifetime, K, V, Mutability, NodeType, HandleType>
+        Handle<NodeRef<Lifetime, K, V, Mutability, NodeType>, HandleType> {
+
+    pub fn reborrow(&self)
+            -> Handle<NodeRef<marker::Borrowed, K, V, marker::Immut, NodeType>, HandleType> {
+
         unsafe { Handle::new(self.node.reborrow(), self.idx) }
     }
 }
 
-impl<Lifetime, K, V, NodeType, HandleType> Handle<NodeRef<Lifetime, K, V, marker::Mut, NodeType>, HandleType> {
-    pub unsafe fn reborrow_mut(&mut self) -> Handle<NodeRef<marker::Borrowed, K, V, marker::Mut, NodeType>, HandleType> {
+impl<Lifetime, K, V, NodeType, HandleType>
+        Handle<NodeRef<Lifetime, K, V, marker::Mut, NodeType>, HandleType> {
+
+    pub unsafe fn reborrow_mut(&mut self)
+            -> Handle<NodeRef<marker::Borrowed, K, V, marker::Mut, NodeType>, HandleType> {
+
         Handle::new(self.node.reborrow_mut(), self.idx)
     }
 }
 
-impl<Lifetime, K, V, Mutability, NodeType> Handle<NodeRef<Lifetime, K, V, Mutability, NodeType>, marker::Edge> {
-    pub fn left_kv(self) -> Result<Handle<NodeRef<Lifetime, K, V, Mutability, NodeType>, marker::KV>, Self> {
+impl<Lifetime, K, V, Mutability, NodeType>
+        Handle<NodeRef<Lifetime, K, V, Mutability, NodeType>, marker::Edge> {
+
+    pub fn left_kv(self)
+            -> Result<Handle<NodeRef<Lifetime, K, V, Mutability, NodeType>, marker::KV>, Self> {
+
         if self.idx > 0 {
             unsafe {
                 Ok(Handle::new(self.node, self.idx - 1))
@@ -611,7 +711,9 @@ impl<Lifetime, K, V, Mutability, NodeType> Handle<NodeRef<Lifetime, K, V, Mutabi
         }
     }
 
-    pub fn right_kv(self) -> Result<Handle<NodeRef<Lifetime, K, V, Mutability, NodeType>, marker::KV>, Self> {
+    pub fn right_kv(self)
+            -> Result<Handle<NodeRef<Lifetime, K, V, Mutability, NodeType>, marker::KV>, Self> {
+
         if self.idx < self.node.len() {
             unsafe {
                 Ok(Handle::new(self.node, self.idx))
@@ -632,7 +734,9 @@ impl<Lifetime, K, V> Handle<NodeRef<Lifetime, K, V, marker::Mut, marker::Leaf>, 
         self.node.vals_mut().get_unchecked_mut(self.idx)
     }
 
-    pub fn insert(mut self, key: K, val: V) -> (InsertResult<Lifetime, K, V, marker::Leaf>, *mut V) {
+    pub fn insert(mut self, key: K, val: V)
+            -> (InsertResult<Lifetime, K, V, marker::Leaf>, *mut V) {
+
         if self.node.len() < self.node.capacity() {
             unsafe {
                 let ptr = self.insert_unchecked(key, val);
@@ -647,7 +751,10 @@ impl<Lifetime, K, V> Handle<NodeRef<Lifetime, K, V, marker::Mut, marker::Leaf>, 
                 }
             } else {
                 unsafe {
-                    Handle::new(right.as_mut().cast_unchecked::<marker::Leaf>(), self.idx - T - 1).insert_unchecked(key, val)
+                    Handle::new(
+                        right.as_mut().cast_unchecked::<marker::Leaf>(),
+                        self.idx - T - 1
+                    ).insert_unchecked(key, val)
                 }
             };
             (InsertResult::Split(left, k, v, right), ptr)
@@ -664,22 +771,32 @@ impl<Lifetime, K, V> Handle<NodeRef<Lifetime, K, V, marker::Mut, marker::Interna
         child.as_leaf_mut().parent_idx = idx;
     }
 
-    unsafe fn cast_unchecked<NewType>(&mut self) -> Handle<NodeRef<marker::Borrowed, K, V, marker::Mut, NewType>, marker::Edge> {
+    unsafe fn cast_unchecked<NewType>(&mut self)
+            -> Handle<NodeRef<marker::Borrowed, K, V, marker::Mut, NewType>, marker::Edge> {
+
         Handle::new(self.node.cast_unchecked(), self.idx)
     }
 
     unsafe fn insert_unchecked(&mut self, key: K, val: V, edge: Root<K, V>) {
         self.cast_unchecked::<marker::Leaf>().insert_unchecked(key, val);
 
-        slice_insert(slice::from_raw_parts_mut(self.node.as_internal_mut().edges.as_mut_ptr(), self.node.len()), self.idx + 1, edge.node);
-        mem::forget(edge);
+        slice_insert(
+            slice::from_raw_parts_mut(
+                self.node.as_internal_mut().edges.as_mut_ptr(),
+                self.node.len()
+            ),
+            self.idx + 1,
+            edge.node
+        );
 
         for i in (self.idx+1)..(self.node.len()+1) {
             Handle::new(self.node.reborrow_mut(), i).correct_parent_link();
         }
     }
 
-    pub fn insert(mut self, key: K, val: V, edge: Root<K, V>) -> InsertResult<Lifetime, K, V, marker::Internal> {
+    pub fn insert(mut self, key: K, val: V, edge: Root<K, V>)
+            -> InsertResult<Lifetime, K, V, marker::Internal> {
+
         // Necessary for correctness, but this is an internal module
         debug_assert!(edge.height == self.node.height - 1);
 
@@ -697,7 +814,10 @@ impl<Lifetime, K, V> Handle<NodeRef<Lifetime, K, V, marker::Mut, marker::Interna
                 }
             } else {
                 unsafe {
-                    Handle::new(right.as_mut().cast_unchecked::<marker::Internal>(), self.idx - T - 1).insert_unchecked(key, val, edge);
+                    Handle::new(
+                        right.as_mut().cast_unchecked::<marker::Internal>(),
+                        self.idx - T - 1
+                    ).insert_unchecked(key, val, edge);
                 }
             }
             InsertResult::Split(left, k, v, right)
@@ -705,18 +825,22 @@ impl<Lifetime, K, V> Handle<NodeRef<Lifetime, K, V, marker::Mut, marker::Interna
     }
 }
 
-impl<Lifetime, K, V, Mutability> Handle<NodeRef<Lifetime, K, V, Mutability, marker::Internal>, marker::Edge> {
+impl<Lifetime, K, V, Mutability>
+        Handle<NodeRef<Lifetime, K, V, Mutability, marker::Internal>, marker::Edge> {
+
     pub fn descend(self) -> NodeRef<Lifetime, K, V, Mutability, marker::LeafOrInternal> {
         NodeRef {
             height: self.node.height - 1,
-            node: unsafe { *self.node.as_internal().edges.get_unchecked(self.idx) },
+            node: unsafe { self.node.as_internal().edges.get_unchecked(self.idx).as_ptr() },
             root: self.node.root,
             _marker: PhantomData
         }
     }
 }
 
-impl<'a, K: 'a, V: 'a, Mutability, NodeType> Handle<NodeRef<marker::Borrowed<'a>, K, V, Mutability, NodeType>, marker::KV> {
+impl<'a, K: 'a, V: 'a, Mutability, NodeType>
+        Handle<NodeRef<marker::Borrowed<'a>, K, V, Mutability, NodeType>, marker::KV> {
+
     pub fn into_kv(self) -> (&'a K, &'a V) {
         let (keys, vals) = self.node.into_slices();
         unsafe {
@@ -725,7 +849,9 @@ impl<'a, K: 'a, V: 'a, Mutability, NodeType> Handle<NodeRef<marker::Borrowed<'a>
     }
 }
 
-impl<'a, K: 'a, V: 'a, NodeType> Handle<NodeRef<marker::Borrowed<'a>, K, V, marker::Mut, NodeType>, marker::KV> {
+impl<'a, K: 'a, V: 'a, NodeType>
+        Handle<NodeRef<marker::Borrowed<'a>, K, V, marker::Mut, NodeType>, marker::KV> {
+
     pub fn into_kv_mut(self) -> (&'a mut K, &'a mut V) {
         let (mut keys, mut vals) = self.node.into_slices_mut();
         unsafe {
@@ -744,7 +870,8 @@ impl<Lifetime, K, V, NodeType> Handle<NodeRef<Lifetime, K, V, marker::Mut, NodeT
 }
 
 impl<Lifetime, K, V> Handle<NodeRef<Lifetime, K, V, marker::Mut, marker::Leaf>, marker::KV> {
-    pub fn split(mut self) -> (NodeRef<Lifetime, K, V, marker::Mut, marker::Leaf>, K, V, Root<K, V>) {
+    pub fn split(mut self)
+            -> (NodeRef<Lifetime, K, V, marker::Mut, marker::Leaf>, K, V, Root<K, V>) {
         unsafe {
             let mut new_node = Box::new(LeafNode::new());
 
@@ -778,7 +905,8 @@ impl<Lifetime, K, V> Handle<NodeRef<Lifetime, K, V, marker::Mut, marker::Leaf>, 
         }
     }
 
-    pub fn remove(mut self) -> (Handle<NodeRef<Lifetime, K, V, marker::Mut, marker::Leaf>, marker::Edge>, K, V) {
+    pub fn remove(mut self)
+            -> (Handle<NodeRef<Lifetime, K, V, marker::Mut, marker::Leaf>, marker::Edge>, K, V) {
         unsafe {
             let k = slice_remove(self.node.keys_mut(), self.idx);
             let v = slice_remove(self.node.vals_mut(), self.idx);
@@ -789,7 +917,8 @@ impl<Lifetime, K, V> Handle<NodeRef<Lifetime, K, V, marker::Mut, marker::Leaf>, 
 }
 
 impl<Lifetime, K, V> Handle<NodeRef<Lifetime, K, V, marker::Mut, marker::Internal>, marker::KV> {
-    pub fn split(mut self) -> (NodeRef<Lifetime, K, V, marker::Mut, marker::Internal>, K, V, Root<K, V>) {
+    pub fn split(mut self)
+            -> (NodeRef<Lifetime, K, V, marker::Mut, marker::Internal>, K, V, Root<K, V>) {
         unsafe {
             let mut new_node = Box::new(InternalNode::new());
 
@@ -822,7 +951,7 @@ impl<Lifetime, K, V> Handle<NodeRef<Lifetime, K, V, marker::Mut, marker::Interna
                 node: BoxedNode::from_internal(new_node),
                 height: height
             };
-            
+
             for i in 0..(new_len+1) {
                 Handle::new(new_root.as_mut().cast_unchecked(), i).correct_parent_link();
             }
@@ -836,10 +965,21 @@ impl<Lifetime, K, V> Handle<NodeRef<Lifetime, K, V, marker::Mut, marker::Interna
     }
 
     pub fn can_merge(&self) -> bool {
-        self.reborrow().left_edge().descend().len() + self.reborrow().right_edge().descend().len() + 1 <= self.node.capacity()
+        (
+            self.reborrow()
+                .left_edge()
+                .descend()
+                .len()
+          + self.reborrow()
+                .right_edge()
+                .descend()
+                .len()
+          + 1
+        ) <= self.node.capacity()
     }
 
-    pub fn merge(mut self) -> Handle<NodeRef<Lifetime, K, V, marker::Mut, marker::Internal>, marker::Edge> {
+    pub fn merge(mut self)
+            -> Handle<NodeRef<Lifetime, K, V, marker::Mut, marker::Internal>, marker::Edge> {
         let self1 = unsafe { ptr::read(&self) };
         let self2 = unsafe { ptr::read(&self) };
         let mut left_node = self1.left_edge().descend();
@@ -851,13 +991,15 @@ impl<Lifetime, K, V> Handle<NodeRef<Lifetime, K, V, marker::Mut, marker::Interna
         debug_assert!(left_len + right_len + 1 <= left_node.capacity());
 
         unsafe {
-            *left_node.keys_mut().get_unchecked_mut(left_len) = slice_remove(self.node.keys_mut(), self.idx);
+            *left_node.keys_mut().get_unchecked_mut(left_len)
+                = slice_remove(self.node.keys_mut(), self.idx);
             ptr::copy_nonoverlapping(
                 right_node.keys().as_ptr(),
                 left_node.keys_mut().as_mut_ptr().offset(left_len as isize + 1),
                 right_len
             );
-            *left_node.vals_mut().get_unchecked_mut(left_len) = slice_remove(self.node.vals_mut(), self.idx);
+            *left_node.vals_mut().get_unchecked_mut(left_len)
+                = slice_remove(self.node.vals_mut(), self.idx);
             ptr::copy_nonoverlapping(
                 right_node.vals().as_ptr(),
                 left_node.vals_mut().as_mut_ptr().offset(left_len as isize + 1),
@@ -873,7 +1015,11 @@ impl<Lifetime, K, V> Handle<NodeRef<Lifetime, K, V, marker::Mut, marker::Interna
             if self.node.height > 1 {
                 ptr::copy_nonoverlapping(
                     right_node.cast_unchecked().as_internal().edges.as_ptr(),
-                    left_node.cast_unchecked().as_internal_mut().edges.as_mut_ptr().offset(left_len as isize + 1),
+                    left_node.cast_unchecked()
+                             .as_internal_mut()
+                             .edges
+                             .as_mut_ptr()
+                             .offset(left_len as isize + 1),
                     right_len + 1
                 );
 
@@ -881,9 +1027,17 @@ impl<Lifetime, K, V> Handle<NodeRef<Lifetime, K, V, marker::Mut, marker::Interna
                     Handle::new(left_node.cast_unchecked().reborrow_mut(), i).correct_parent_link();
                 }
 
-                heap::deallocate(*right_node.node.ptr, mem::size_of::<InternalNode<K, V>>(), mem::align_of::<InternalNode<K, V>>());
+                heap::deallocate(
+                    *right_node.node as *mut u8,
+                    mem::size_of::<InternalNode<K, V>>(),
+                    mem::align_of::<InternalNode<K, V>>()
+                );
             } else {
-                heap::deallocate(*right_node.node.ptr, mem::size_of::<LeafNode<K, V>>(), mem::align_of::<LeafNode<K, V>>());
+                heap::deallocate(
+                    *right_node.node as *mut u8,
+                    mem::size_of::<LeafNode<K, V>>(),
+                    mem::align_of::<LeafNode<K, V>>()
+                );
             }
 
             left_node.as_leaf_mut().len += right_len as u16 + 1;
@@ -893,8 +1047,13 @@ impl<Lifetime, K, V> Handle<NodeRef<Lifetime, K, V, marker::Mut, marker::Interna
     }
 }
 
-impl<Lifetime, K, V, Mutability, HandleType> Handle<NodeRef<Lifetime, K, V, Mutability, marker::LeafOrInternal>, HandleType> {
-    pub fn force(self) -> ForceResult<Handle<NodeRef<Lifetime, K, V, Mutability, marker::Leaf>, HandleType>, Handle<NodeRef<Lifetime, K, V, Mutability, marker::Internal>, HandleType>> {
+impl<Lifetime, K, V, Mutability, HandleType>
+        Handle<NodeRef<Lifetime, K, V, Mutability, marker::LeafOrInternal>, HandleType> {
+
+    pub fn force(self) -> ForceResult<
+        Handle<NodeRef<Lifetime, K, V, Mutability, marker::Leaf>, HandleType>,
+        Handle<NodeRef<Lifetime, K, V, Mutability, marker::Internal>, HandleType>
+    > {
         match self.node.force() {
             ForceResult::Leaf(node) => ForceResult::Leaf(Handle {
                 node: node,
